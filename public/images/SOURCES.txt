@@ -1,0 +1,26 @@
+Illustrative stock photography for design only. These are not verified photographs of Open Mind's Public School.
+
+campus.jpg
+https://images.unsplash.com/photo-1562774053-701939374585?w=2000&q=90&fit=crop
+
+library.jpg
+https://images.unsplash.com/photo-1507842217343-583bb7270b66?w=1200&q=85&fit=crop
+
+classroom.jpg
+https://images.unsplash.com/photo-1509062522246-3755977927d7?w=1200&q=85&fit=crop
+
+Downloaded 2026-11-06. All images JPEG, validated with file and visually inspected.
+
+portal-illustration.png
+Original illustration generated with the built-in Imagegen tool on 2026-11-06.
+Final prompt: Use case: stylized-concept. Asset type: full-height illustration panel for an Indian school's login website. Create a high quality polished 3D clay-style illustration: a friendly young adult Indian male educator with round glasses and neatly styled dark hair, wearing a lime-green sweater, navy trousers and simple white trainers, seated at a dark forest-green desk using an open silver laptop. On the desk a small purple mug and two stacked books. Minimal softly rounded school office, pale pistachio green gradient wall, dark green floor, a small white wall clock, one simple tall potted plant to the right. Cozy stylized 3D objects, pleasing soft shadows and ambient occlusion, premium playful website illustration, entirely original character. Composition portrait 4:5, show entire desk and seated figure, centered in the lower two-thirds, plenty of clean green space above for separately implemented website text, wide enough margins to avoid crop. Soft studio light, pistachio, lime and deep green palette. Do not put any text, letters, watermark, UI, buttons, logos, borders or white login form into the image. This is the illustration only, not a website screenshot.
+Used as the illustration panel of the school sign-in page.
+
+learning-girl.png and learning-boy.png
+Original fictional portraits generated using the built-in Imagegen tool. Transparent PNG assets for the public website; not actual school students.
+Final prompt for learning-girl.png: Create an original photorealistic studio cutout for a joyful primary-school website. A smiling Indian girl aged 8 with curly dark hair, round glasses, a white short-sleeved school shirt, navy skirt, and coral backpack straps. She playfully balances three colorful closed books on her head, holding them with both hands. Show from above the books down to below her waist. Front-facing, joyful confident expression, naturally proportioned hands and body. Soft professional studio light, editorial education photography, sharp high resolution. Isolate the entire subject on a genuinely transparent background. No floor, no shadow panel, no circle, no background, no lettering, no logo, no watermark. Portrait composition, generous clear margin around both raised elbows. Fictional child, not a real student.
+Final prompt for learning-boy.png: Create an original photorealistic studio cutout for a joyful primary-school website. A smiling Indian boy aged 9 with neatly styled short dark hair, white short-sleeved school shirt and navy trousers, holding a stack of three colorful closed books at waist level with a red apple resting on the top book. Show from above the head down to upper thighs. Front-facing, warm confident expression, naturally proportioned hands and body. Soft professional studio light, editorial education photography, sharp high resolution. Isolate the entire subject on a genuinely transparent background. No floor, no shadow panel, no circle, no background, no lettering, no logo, no watermark. Portrait composition, generous margin around subject. Fictional child, not a real student.
+
+school-logo.jpeg
+User-supplied official logo: WhatsApp Image 2026-11-06 at 17.24.30.jpeg.
+Copied without image modifications. Used in the public header and footer, login screens, shared portal sidebar branding and browser favicon.

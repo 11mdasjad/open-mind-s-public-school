@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: school
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: openmind
+    volumes:
+      - school-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U school -d openmind"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://school:${POSTGRES_PASSWORD}@db:5432/openmind
+      APP_ORIGIN: https://${SCHOOL_DOMAIN:?Set SCHOOL_DOMAIN}
+      NODE_ENV: production
+      TRUST_PROXY: "1"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM: ${TWILIO_FROM:-}
+    volumes:
+      - school-uploads:/app/uploads
+  web:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    environment:
+      SCHOOL_DOMAIN: ${SCHOOL_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+volumes:
+  school-db:
+  school-uploads:
+  caddy-data:
+  caddy-config:

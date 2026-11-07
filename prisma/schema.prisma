@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  name String
+  passwordHash String
+  role String
+  active Boolean @default(true)
+  failedAttempts Int @default(0)
+  lockedUntil DateTime?
+  createdAt DateTime @default(now())
+  sessions Session[]
+  students Student[] @relation("StudentUser")
+  children Student[] @relation("ParentUser")
+  employees Employee[]
+  entries Entry[]
+  documents Document[]
+}
+model Session {
+  id String @id
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  csrf String
+  expiresAt DateTime
+  @@index([userId])
+}
+model Student {
+  id String @id @default(cuid())
+  admissionNo String @unique
+  name String
+  email String @unique
+  dob String
+  gender String
+  className String
+  section String
+  session String
+  parentName String
+  parentEmail String
+  phone String
+  address String
+  userId String @unique
+  user User @relation("StudentUser",fields:[userId],references:[id])
+  parentId String
+  parent User @relation("ParentUser",fields:[parentId],references:[id])
+  details Json
+  archived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  attendance Attendance[]
+  invoices Invoice[]
+  marks Mark[]
+  entries Entry[]
+  @@index([className,section,session])
+  @@index([parentId])
+}
+model Employee {
+  id String @id @default(cuid())
+  employeeNo String @unique
+  name String
+  email String @unique
+  phone String
+  department String
+  designation String
+  joiningDate String
+  qualification String
+  salary Int @default(0)
+  userId String @unique
+  user User @relation(fields:[userId],references:[id])
+  details Json
+  archived Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  attendance Attendance[]
+  payroll Payroll[]
+}
+model Attendance {
+  id String @id @default(cuid())
+  studentId String?
+  student Student? @relation(fields:[studentId],references:[id])
+  employeeId String?
+  employee Employee? @relation(fields:[employeeId],references:[id])
+  personKey String
+  date String
+  period String @default("Daily")
+  status String
+  checkIn DateTime?
+  checkOut DateTime?
+  markedBy String
+  updatedAt DateTime @updatedAt
+  @@unique([personKey,date,period])
+  @@index([date])
+}
+model Invoice {
+  id String @id @default(cuid())
+  number String @unique
+  studentId String
+  student Student @relation(fields:[studentId],references:[id])
+  title String
+  amount Int
+  dueDate String
+  session String
+  createdAt DateTime @default(now())
+  payments Payment[]
+  orders GatewayOrder[]
+  @@index([studentId])
+}
+model Payment {
+  id String @id @default(cuid())
+  receipt String @unique
+  invoiceId String
+  invoice Invoice @relation(fields:[invoiceId],references:[id])
+  amount Int
+  method String
+  reference String? @unique
+  recordedBy String
+  createdAt DateTime @default(now())
+  refunds Refund[]
+}
+model Refund {
+  id String @id @default(cuid())
+  paymentId String
+  payment Payment @relation(fields:[paymentId],references:[id])
+  amount Int
+  reason String
+  reference String @unique
+  recordedBy String
+  createdAt DateTime @default(now())
+}
+model Configuration {
+  id String @id
+  data Json
+  updatedAt DateTime @updatedAt
+}
+model Exam {
+  id String @id @default(cuid())
+  name String
+  className String
+  subject String
+  date String
+  maxMarks Int
+  passMarks Int
+  session String
+  published Boolean @default(false)
+  marks Mark[]
+}
+model Mark {
+  id String @id @default(cuid())
+  examId String
+  exam Exam @relation(fields:[examId],references:[id])
+  studentId String
+  student Student @relation(fields:[studentId],references:[id])
+  score Float
+  remarks String @default("")
+  @@unique([examId,studentId])
+}
+model Payroll {
+  id String @id @default(cuid())
+  employeeId String
+  employee Employee @relation(fields:[employeeId],references:[id])
+  month String
+  basic Int
+  allowances Int
+  deductions Int
+  net Int
+  status String @default("Draft")
+  @@unique([employeeId,month])
+}
+model Entry {
+  id String @id @default(cuid())
+  module String
+  title String
+  status String @default("Active")
+  data Json
+  userId String?
+  user User? @relation(fields:[userId],references:[id])
+  studentId String?
+  student Student? @relation(fields:[studentId],references:[id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  archived Boolean @default(false)
+  @@index([module,archived])
+  @@index([userId,studentId])
+}
+model Admission {
+  id String @id @default(cuid())
+  reference String @unique
+  childName String
+  parentName String
+  email String
+  phone String
+  className String
+  message String
+  status String @default("New")
+  createdAt DateTime @default(now())
+}
+model WebsitePage {
+  id String @id
+  title String
+  body String
+  updatedAt DateTime @updatedAt
+}
+model Document {
+  id String @id @default(cuid())
+  name String
+  path String
+  mime String
+  size Int
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  createdAt DateTime @default(now())
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String
+  action String
+  entity String
+  entityId String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model PasswordReset {
+  tokenHash String @id
+  userId String
+  expiresAt DateTime
+}
+model GatewayOrder {
+  id String @id
+  invoiceId String
+  invoice Invoice @relation(fields:[invoiceId],references:[id])
+  amount Int
+  status String @default("Created")
+  paymentId String? @unique
+  createdAt DateTime @default(now())
+  @@index([invoiceId])
+}
+model DeliveryLog {
+  id String @id @default(cuid())
+  channel String
+  recipient String
+  subject String
+  body String
+  status String @default("Pending")
+  providerId String?
+  error String?
+  actorId String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
