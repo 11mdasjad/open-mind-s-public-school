@@ -162,8 +162,16 @@ app.use("/api", (req, res, next) => {
 app.get(
   "/api/health",
   wrap(async (_req, res) => {
-    await db.user.count();
-    res.json({ ok: true });
+    try {
+      await db.user.count();
+      res.json({ ok: true, database: "connected" });
+    } catch (e: any) {
+      res.status(503).json({
+        ok: false,
+        database: "disconnected",
+        error: "Database connection failed. Please check DATABASE_URL in environment variables.",
+      });
+    }
   }),
 );
 app.get(
@@ -1838,6 +1846,8 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
                   ? "File exceeds 5 MB."
                   : status === 404
                     ? "Record not found."
-                    : "The request could not be completed.",
+                    : err.message && (err.message.includes("DATABASE_URL") || err.message.includes("Can't reach database") || err.code === "P1001" || err.code === "P1000")
+                      ? "Database connection not configured or unreachable. Please set DATABASE_URL in environment variables."
+                      : "The request could not be completed.",
     });
 });
