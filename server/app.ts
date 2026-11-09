@@ -1619,9 +1619,10 @@ registerNotificationRoutes(router,{wrap,fail});
 registerAccessRoutes(router,{wrap,permit,fail,audit});
 registerActivityRoutes(router,{wrap,permit,fail});
 registerMemberRoutes(router,{wrap,permit,fail,audit,allowedStudents,scopedEntries});
-mkdirSync("uploads", { recursive: true });
+const uploadDir = process.env.VERCEL ? path.join("/tmp", "uploads") : path.resolve("uploads");
+mkdirSync(uploadDir, { recursive: true });
 const upload = multer({
-  dest: "uploads/",
+  dest: uploadDir,
   limits: { fileSize: 5 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) =>
     cb(
@@ -1794,6 +1795,10 @@ router.get(
   }),
 );
 app.use("/api", router);
+app.use((req, res, next) => {
+  if (req.url.startsWith("/api")) return next();
+  router(req, res, next);
+});
 app.use("/api", (_req, res) =>
   res.status(404).json({ error: "Endpoint not found." }),
 );

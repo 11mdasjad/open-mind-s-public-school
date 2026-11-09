@@ -11,7 +11,38 @@ export async function api(path: string, method = "GET", body?: any) {
     },
     body: body ? (multipart ? body : JSON.stringify(body)) : undefined,
   });
-  const data = await response.json();
+
+  const contentType = response.headers.get("content-type") || "";
+  let data: any = null;
+  if (contentType.includes("application/json")) {
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+  }
+
+  if (!data) {
+    let errorText = "";
+    try {
+      errorText = (await response.text()).trim();
+    } catch {}
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(
+          "Backend API endpoint not found (404). Backend server is not reachable on this domain.",
+        );
+      }
+      throw new Error(
+        errorText && errorText.length < 120 && !errorText.includes("<")
+          ? errorText
+          : `Server response error (${response.status}). Please check server logs.`,
+      );
+    }
+    return {};
+  }
+
   if (!response.ok)
     throw new Error(data.error || "Something went wrong. Please try again.");
   if (data.csrf) csrf = data.csrf;

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
-    "build": "tsc --noEmit && vite build",
+    "build": "prisma generate && tsc --noEmit && vite build",
+    "postinstall": "prisma generate",
     "start": "tsx server/index.ts",
     "db:local": "node scripts/local-db.mjs",
     "db:generate": "prisma generate",
