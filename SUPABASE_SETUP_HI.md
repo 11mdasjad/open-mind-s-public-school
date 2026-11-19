@@ -338,3 +338,24 @@ Supabase पर नए real records लिखे जा चुके हों �
 6. Current Data API बंद रखें: app अपने Express API और existing access checks उपयोग करता है।
 
 Validation: production build, दोनों isolated startup tests, सभी 26 tables का complete data comparison, Prisma read/write/rollback और document file presence पास हुए। Final backup को private रखें।
+
+## 15 Vercel पर database-connected preview deploy करें
+
+Repository `asjadmldev-cell/Open-mind-` import करें। Framework Vite, Root Directory `./`, Build Command `npm run build`, Output Directory `dist`, Install Command `npm ci --include=dev` रखें। Existing `api/index.ts` Express API serve करता है। `vercel.json` में public CA certificate को function bundle में शामिल किया गया है।
+
+इस computer पर ignored private `.env.vercel` तैयार है। इसमें DATABASE_URL का password पहले से URI-encoded है, Transaction pooler port 6543, connection limit 2 और certificate का portable path `certs/supabase-ca.crt` है। Local `.env` वाला Mac-specific path Vercel में paste न करें। `.env.vercel` को GitHub पर upload न करें।
+
+Vercel के Environment Variables में Production environment के लिए:
+
+| Name | Value |
+| --- | --- |
+| DATABASE_URL | Private `.env.vercel` में इसी नाम की पूरी value; surrounding quotes न लें |
+| NODE_ENV | production |
+| TRUST_PROXY | 1 |
+| APP_ORIGIN | Deployment का वास्तविक https URL; domain मिलने के बाद जोड़कर redeploy करें |
+
+पहले deploy पर APP_ORIGIN उपलब्ध न हो तो खाली छोड़ सकते हैं: app उसी hostname से आए requests भी allow करता है। Preview environment को इसी school database से जोड़ने पर preview भी real records बदलेगा; उसे अलग database देने की योजना रखें।
+
+Deploy के बाद `https://ACTUAL-DOMAIN/api/health` में `{"ok":true,"database":"connected"}` जाँचें, फिर `https://ACTUAL-DOMAIN/#/login/admin` पर existing school credentials से login करें। Supabase database password login form में नहीं डालना है। Environment variables बदलने के बाद नया deployment/redeploy जरूरी है। [Vercel environment variables](https://vercel.com/docs/environment-variables/managing-environment-variables)
+
+Publishable key, service-role key, ADMIN_PASSWORD, PORT और VITE_DATABASE_URL इस deployment के लिए आवश्यक नहीं हैं। Database migrations पहले से लागू हैं; build में seed/reset/import commands न लगाएँ। File uploads के लिए durable Storage और automatic fee reminders के लिए scheduler अभी बाकी हैं; यह configuration उन सुविधाओं को अपने-आप पूरा नहीं करती।
