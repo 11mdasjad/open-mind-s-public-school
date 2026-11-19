@@ -1,6 +1,6 @@
-import {registerFeeOffice} from './fee-office';
-import {saveVersion,serial,FeeOfficeError} from './fee-office-core';
-import {emitSchoolNotification,registerNotificationRoutes} from './notifications';
+import {registerFeeOffice} from './fee-office.js';
+import {saveVersion,serial,FeeOfficeError} from './fee-office-core.js';
+import {emitSchoolNotification,registerNotificationRoutes} from './notifications.js';
 import express, {
   type Request,
   type Response,
@@ -16,20 +16,20 @@ import path from "node:path";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import { z } from "zod";
-import { db } from "./db";
-import { modules, admins, roles, publicPages } from "../shared/modules";
-import { registerExtensions } from "./extensions";
-import { validSignature, reconcilePayment } from "./payments";
-import { defaultGrades, gradeFor } from "./grades";
-import {portalForRole,portalKinds,defaultPermission,studentCreateRoles,studentArchiveRoles,studentEditRoles} from '../shared/portals';
-import {schoolSettings,effectiveAccess,moduleForPath,isDelegated,hasDelegatedRead,registerAccessRoutes} from './access';
-import {registerMemberRoutes} from './members';
-import {registerWorkflowRoutes} from './workflow';
-import {activityMiddleware,registerActivityRoutes} from './activity';
-import {registerStudentProfiles} from './student-profiles';
-import {allowedDraftStudents, invoiceScope} from './student-register';
-import {classKey} from '../shared/student-register';
-import {readFeeSchedule} from './fee-schedule';
+import { db } from "./db.js";
+import { modules, admins, roles, publicPages } from "../shared/modules.js";
+import { registerExtensions } from "./extensions.js";
+import { validSignature, reconcilePayment } from "./payments.js";
+import { defaultGrades, gradeFor } from "./grades.js";
+import {portalForRole,portalKinds,defaultPermission,studentCreateRoles,studentArchiveRoles,studentEditRoles} from '../shared/portals.js';
+import {schoolSettings,effectiveAccess,moduleForPath,isDelegated,hasDelegatedRead,registerAccessRoutes} from './access.js';
+import {registerMemberRoutes} from './members.js';
+import {registerWorkflowRoutes} from './workflow.js';
+import {activityMiddleware,registerActivityRoutes} from './activity.js';
+import {registerStudentProfiles} from './student-profiles.js';
+import {allowedDraftStudents, invoiceScope} from './student-register.js';
+import {classKey} from '../shared/student-register.js';
+import {readFeeSchedule} from './fee-schedule.js';
 
 declare global {
   namespace Express {

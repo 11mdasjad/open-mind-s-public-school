@@ -1,6 +1,6 @@
-import {db} from './db';
-import {admins} from '../shared/modules';
-import {portalForRole} from '../shared/portals';
+import {db} from './db.js';
+import {admins} from '../shared/modules.js';
+import {portalForRole} from '../shared/portals.js';
 export function registerMemberRoutes(router:any,{wrap,permit,fail,audit,allowedStudents,scopedEntries}:any){
   router.get('/portal-summary',wrap(async(req:any,res:any)=>{
     const kind=portalForRole(req.account.role),family=kind==='student';

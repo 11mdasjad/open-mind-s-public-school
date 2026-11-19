@@ -1,9 +1,9 @@
-import {feeHeadBalances,schoolDate} from '../shared/fee-finance';
+import {feeHeadBalances,schoolDate} from '../shared/fee-finance.js';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { balance, paid, day, effectiveDue, adjustedInstallments, invoiceStatus, profileId, sum, reject } from './fee-office-core';
+import { balance, paid, day, effectiveDue, adjustedInstallments, invoiceStatus, profileId, sum, reject } from './fee-office-core.js';
 const cash=(v:number)=>`INR ${(v/100).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const plain=(v:any)=>String(v??'').replace(/[\u2010-\u2015]/g,'-').replaceAll('₹','INR ').replaceAll('·',' / ');
 function start(res:any,school:any,title:string,compact=false){

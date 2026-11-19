@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { db } from './db';
-import { schoolSettings } from './access';
-import { allowedDraftStudents, invoiceScope } from './student-register';
-import { classKey } from '../shared/student-register';
-import { paymentsEnabled } from './payments';
-import { day,reject,dateValue,periodValue,amountValue,percent,sum,paid,balance,invoiceStatus,effectiveDue,overdueBalance,adjustedInstallments,owner,profileId,digest,reference,serial,log,notify,currentVersions,assignmentAt,configSchema,saveVersion,initializeFees,calculatePreview,appendAdjustment,allocateCollection } from './fee-office-core';
-import { exportFeeReport, feeDocument } from './fee-office-documents';
+import { db } from './db.js';
+import { schoolSettings } from './access.js';
+import { allowedDraftStudents, invoiceScope } from './student-register.js';
+import { classKey } from '../shared/student-register.js';
+import { paymentsEnabled } from './payments.js';
+import { day,reject,dateValue,periodValue,amountValue,percent,sum,paid,balance,invoiceStatus,effectiveDue,overdueBalance,adjustedInstallments,owner,profileId,digest,reference,serial,log,notify,currentVersions,assignmentAt,configSchema,saveVersion,initializeFees,calculatePreview,appendAdjustment,allocateCollection } from './fee-office-core.js';
+import { exportFeeReport, feeDocument } from './fee-office-documents.js';
 const include={payments:{include:{refunds:true}},adjustments:true,installments:true};
 const filterSchema=z.object({session:z.string().min(1).max(80),period:periodValue,className:z.string().max(80).default(''),section:z.string().max(80).default(''),studentId:z.string().max(100).default('')});
 const assignmentSchema=z.object({session:z.string().min(1).max(80),effectiveDate:dateValue,transportRequired:z.boolean(),route:z.string().max(100).default(''),extraKeys:z.array(z.string()).max(100).refine(v=>new Set(v).size===v.length,'Choose each fee only once.').default([]),discountKeys:z.array(z.string()).max(30).refine(v=>new Set(v).size===v.length,'Choose each concession only once.').default([]),lateFeeExempt:z.boolean().default(false),remarks:z.string().min(3).max(1000)});

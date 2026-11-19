@@ -1,6 +1,6 @@
-import {db} from './db';
-import {admins} from '../shared/modules';
-import {classKey} from '../shared/student-register';
+import {db} from './db.js';
+import {admins} from '../shared/modules.js';
+import {classKey} from '../shared/student-register.js';
 
 export async function allowedDraftStudents(req: any) {
   if (req.account.permissions?.students === 'none') return [];

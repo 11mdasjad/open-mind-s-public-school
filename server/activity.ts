@@ -1,8 +1,8 @@
 import type {Request,Response,NextFunction} from 'express';
 import {z} from 'zod';
-import {db} from './db';
-import {moduleCatalog} from '../shared/portals';
-import {moduleForPath} from './access';
+import {db} from './db.js';
+import {moduleCatalog} from '../shared/portals.js';
+import {moduleForPath} from './access.js';
 
 const pending=new Set<Promise<unknown>>();
 export async function flushActivity(){while(pending.size)await Promise.allSettled([...pending]);}

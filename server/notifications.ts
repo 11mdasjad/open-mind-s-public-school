@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
-import {db} from './db';
-import {effectiveAccess} from './access';
-import {moduleCatalog} from '../shared/portals';
+import {db} from './db.js';
+import {effectiveAccess} from './access.js';
+import {moduleCatalog} from '../shared/portals.js';
 const staffRoles=['Super Admin','School Admin','Principal','HR Manager'];
 const day=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
 const key=(event:string,userId:string)=>'notification-'+createHash('sha256').update(event+':'+userId).digest('hex');

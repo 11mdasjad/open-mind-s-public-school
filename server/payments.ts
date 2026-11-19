@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
-import { db } from "./db";
+import { db } from "./db.js";
 export const paymentsEnabled = () =>
   Boolean(
     process.env.RAZORPAY_KEY_ID &&

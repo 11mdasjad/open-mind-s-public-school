@@ -1,9 +1,9 @@
 import {readFileSync, unlinkSync} from 'node:fs';
 import path from 'node:path';
 import {z} from 'zod';
-import {db} from './db';
-import {allowedDraftStudents} from './student-register';
-import {studentEditRoles} from '../shared/portals';
+import {db} from './db.js';
+import {allowedDraftStudents} from './student-register.js';
+import {studentEditRoles} from '../shared/portals.js';
 
 export function registerStudentProfiles(router: any, {wrap, fail, requireStudent, upload, audit}: any) {
   async function resolve(req: any) {

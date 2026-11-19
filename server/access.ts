@@ -1,6 +1,6 @@
-import {db} from './db';
-import {roles} from '../shared/modules';
-import {moduleCatalog,permissionsForRole,defaultPermission,delegatableModules,type PermissionMap} from '../shared/portals';
+import {db} from './db.js';
+import {roles} from '../shared/modules.js';
+import {moduleCatalog,permissionsForRole,defaultPermission,delegatableModules,type PermissionMap} from '../shared/portals.js';
 import {z} from 'zod';
 export async function schoolSettings(){
  const stored=await db.configuration.findUnique({where:{id:'school-settings'}});

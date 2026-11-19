@@ -1,7 +1,7 @@
-import {db} from './db';
-import {currentVersions} from './fee-office-core';
-import {classKey} from '../shared/student-register';
-import type {FeeSchedule,TransportRate} from '../shared/fee-schedule';
+import {db} from './db.js';
+import {currentVersions} from './fee-office-core.js';
+import {classKey} from '../shared/student-register.js';
+import type {FeeSchedule,TransportRate} from '../shared/fee-schedule.js';
 export async function readFeeSchedule(session:string):Promise<FeeSchedule>{
   const versions=await db.feeVersion.findMany({where:{session}});
   if(versions.length){const current=currentVersions(versions).filter(r=>r.active);return {session,tuition:current.filter(r=>r.kind==='structure'&&r.data.category==='Tuition Fee'&&r.data.frequency==='Monthly').map(r=>({id:r.id,className:r.data.className,amount:r.data.amount/100})),transport:current.filter(r=>r.kind==='route').map(r=>({route:r.data.name,amount:r.data.amount/100}))};}

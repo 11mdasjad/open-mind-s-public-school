@@ -1,5 +1,5 @@
-import {db} from './db';
-import {currentVersions,day,balance,effectiveDue,notify,serial} from './fee-office-core';
+import {db} from './db.js';
+import {currentVersions,day,balance,effectiveDue,notify,serial} from './fee-office-core.js';
 // A persistent Node deployment runs this job. Serverless deployments call the
 // same entry point from their scheduler; all deliveries have unique event keys.
 export async function syncFeeReminders(){

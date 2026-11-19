@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
-import { db } from './db';
-import { classKey } from '../shared/student-register';
-import { suppliedTuition, suppliedTransport } from '../shared/fee-schedule';
+import { db } from './db.js';
+import { classKey } from '../shared/student-register.js';
+import { suppliedTuition, suppliedTransport } from '../shared/fee-schedule.js';
 export const day = () => new Date().toLocaleDateString('en-CA', {timeZone:'Asia/Kolkata'});
 export class FeeOfficeError extends Error {constructor(public status:number,message:string){super(message);}}
 export function reject(status:number,message:string):never {throw new FeeOfficeError(status,message);}

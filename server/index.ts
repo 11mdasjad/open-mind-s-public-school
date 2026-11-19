@@ -1,5 +1,5 @@
-import {startFeeMaintenance} from './fee-maintenance';
-import { app } from "./app";
+import {startFeeMaintenance} from './fee-maintenance.js';
+import { app } from "./app.js";
 const port = Number(process.env.PORT || 3001);
 app.listen(
   port,

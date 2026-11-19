@@ -1,4 +1,4 @@
-import {modules} from './modules';
+import {modules} from './modules.js';
 export const portalKinds=['admin','principal','teacher','hr','accounts','student','employee'] as const;
 export type PortalKind=typeof portalKinds[number];
 export const portalNames:Record<PortalKind,string>={admin:'Super Admin',principal:'Principal',teacher:'Teacher',hr:'HR',accounts:'Fees & Accounts',student:'Student',employee:'Employee'};

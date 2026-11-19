@@ -1,17 +1,17 @@
-import {appendAdjustment} from './fee-office-core';
+import {appendAdjustment} from './fee-office-core.js';
 import { z } from "zod";
-import { db } from "./db";
-import {allowedDraftStudents,invoiceScope} from './student-register';
-import {classKey} from '../shared/student-register';
-import { admins } from "../shared/modules";
+import { db } from "./db.js";
+import {allowedDraftStudents,invoiceScope} from './student-register.js';
+import {classKey} from '../shared/student-register.js';
+import { admins } from "../shared/modules.js";
 import {
   gateway,
   paymentsEnabled,
   validSignature,
   reconcilePayment,
-} from "./payments";
+} from "./payments.js";
 import { randomBytes } from "node:crypto";
-import { defaultGrades } from "./grades";
+import { defaultGrades } from "./grades.js";
 import PDFDocument from "pdfkit";
 export function registerExtensions(
   router: any,
