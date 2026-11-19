@@ -25,20 +25,18 @@ From this directory, after a fresh installation:
 
 ```sh
 npm ci
-npm run db:start
-```
-
-Keep the database terminal running. In another terminal:
-
-```sh
-npm run db:generate
-npm run db:migrate
 npm run dev
 ```
 
-`db:start` runs a project-local PostgreSQL instance on `127.0.0.1:55432`. It creates a random database password, stores it in the ignored `data/` directory, and prepares the ignored `.env` file. No system database account or service is installed. Stop it with Ctrl+C; its data persists.
+`npm run dev` starts the project-local PostgreSQL database, waits for a successful connection, applies pending migrations, then starts the API and website at `http://127.0.0.1:5173`. Keep this single terminal running. It checks the local database every five seconds and restarts it if its process stops. Ctrl+C stops the processes it started; school records persist in `data/postgres`. A database already running in another terminal is reused and is not stopped by this command. Duplicate website instances are rejected instead of silently switching ports.
 
-For an existing PostgreSQL server, set `DATABASE_URL` in `.env` instead and skip `db:start`.
+On first use, a random database password is stored in the ignored `data/postgres-local.json` and `.env` files. Existing settings and records are preserved. No system database account or service is installed. `npm run db:start` remains available when only the database is needed.
+
+`npm run test:startup` verifies startup, reuse, recovery after a database process stops, and data preservation using a separate temporary database.
+
+For an existing PostgreSQL server, set `DATABASE_URL` in `.env`, run `npm run db:migrate`, then `npm run dev`. External database settings are never replaced; its server must be running. If its connection fails, startup stops with a useful error before opening the website.
+
+For Supabase setup with existing school records, follow the [Hindi setup and migration guide](SUPABASE_SETUP_HI.md). The current local installation uses Supabase with verified TLS; all 26 application tables were copied and checked against the private backup. New records save there through the existing Express API. Uploaded file bytes remain in `uploads/`. Run `npm run db:migrate` for future schema migrations; the wrapper handles verified TLS on macOS.
 
 The optional `db:local` script is the original SQLite fallback, with a separately generated schema. Do not run it against a PostgreSQL `.env`. PostgreSQL is the configured and tested default.
 
@@ -141,7 +139,11 @@ Do not deploy this build as a finished replacement for all school administration
 
 Use the same class/section/session spelling across records. A parent email can link multiple children; student and parent email addresses must differ. Existing parent emails cannot be silently reassigned through the student edit form.
 
-Excel imports use the provided template headers. Up to 500 rows / 2 MB are accepted. Rows are saved individually and failures are listed; a partially successful import is not rolled back. Copy activation links before closing the import result.
+Excel imports use the provided template headers. Up to 500 rows / 2 MB are accepted. Complete student rows create student accounts and activation links; rows missing required fields are stored as editable incomplete records without student or guardian logins. School administrators can fill in missing details later and register the student when the required information is complete. Other import rows are saved individually, and failures are listed; a partially successful import is not rolled back.
+
+Click a student name, admission number or roll number to open a full profile. Search supports names, roll numbers and admission numbers across classes, or within the selected class. Profiles include personal, parent, contact and admission details, an editable photo, and Fees, Attendance and Documents tabs. Fee invoices are listed by due month: green Paid, red Unpaid, yellow Pending for partial payments or collections awaiting verification. Add payment uses the existing collection-and-review workflow; verified payments provide PDF receipt links. Daily attendance appears in a monthly calendar with explicit marks and separate subject-period records. Unmarked dates are never counted as absences. Student-linked PDF/image documents and photos are limited to 5 MB and respect account scope and module permissions. Imported records support attendance, fee invoices, verified payments, profiles and attachments before login registration. Attendance, invoices and attachments carry over on registration without generating placeholder accounts.
+
+Profile integration tests run with `npm test` in an isolated database. With `npm run dev` running, `node tests/student-profile.browser.mjs` checks profile interactions and mobile layout using browser-only fixtures, without reading or writing school records.
 
 ## Build and verification
 
@@ -233,3 +235,11 @@ The images are illustrative stock photographs, not verified photographs of Open 
 API route and permission documentation is in [API.md](API.md).
 
 Student registration is available to Super Admin, School Admin, Principal, HR Manager, Teacher, Class Teacher and the existing Receptionist role. Teachers retain access to their assigned classes and students they registered. Student removal is archive-only and restricted to Super Admin, School Admin and Principal; it disables the student login and revokes sessions and reset links while preserving history. HR and teachers cannot edit or archive student records through the UI or API.
+
+Class attendance opens Nursery, LKG, UKG and Class 1–7 registers. Select a date, mark or correct students and save changed rows. The monthly history reuses loaded data when switching days. Unsaved day/class changes require a discard decision; bulk marking affects only unmarked students. Student fees opens class → student → month, with explicit Not assigned, Unpaid, Pending and Paid states. Assign a real fee amount before collecting a payment. Duplicate monthly charges and collections beyond the unreserved balance are rejected. Profiles, finance totals, exports and receipts share the same invoice ledger for imported and registered students.
+
+Heavy admin, activity, employee and student workspaces load on demand. Simultaneous identical GET requests are coalesced without caching stale responses. School settings are loaded once per portal session, and attendance saving updates the current register without refetching the roster. Run `node tests/student-workspaces.browser.mjs` with the local dev server for class attendance and monthly fee UI checks.
+
+The **Fee structures** page displays current-session tuition and transport rates, with a calculator for tuition plus optional transport. The supplied school infographic was transcribed as Nursery/LKG/UKG ₹350 monthly, Classes 1–8 ₹400 monthly; Jalalpur ₹300, Dumra ₹400, Lakri ₹800, Bala ₹400, Ajbinagar ₹400 and Parauli ₹800 monthly. Tuition templates are editable in the existing fee-structure table; authorized staff can edit transport amounts on the same page. The monthly student fee form offers tuition, route-specific transport and other fees. Tuition and transport are separate invoice items, and rate changes preserve earlier invoice amounts.
+
+`npx tsx scripts/import-school-fees.ts` imports that supplied schedule into the current session without creating invoices. It is safe to rerun when rates match and stops if existing rates differ. `npx tsx tests/fee-schedule.browser.mjs` checks the displayed rates, calculator and mobile layout with fixtures.

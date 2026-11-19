@@ -1,0 +1,72 @@
+.register-workspace{min-width:0}.rw-heading,.rw-controls,.rw-day-heading,.rw-save{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:20px 22px}.rw-heading h2,.rw-heading h3,.rw-day-heading h3{margin:0 0 7px;color:#29213f}.rw-heading p,.rw-day-heading span,.rw-save>span{margin:0;font-size:13px;color:#756b82;line-height:1.6}.rw-controls{border-block:1px solid #e9e3f2;justify-content:flex-start}.register-workspace label{display:grid;gap:6px;font-size:12px;color:#625670}.register-workspace input,.register-workspace select{padding:10px;border:1px solid #dcd3e8;border-radius:8px;min-height:40px;font:inherit;background:white;color:#30263f}.rw-pad{padding:16px 22px}.rw-counts{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;padding:0 22px 20px}.rw-counts>div{display:grid;gap:6px;border:1px solid #e7e1ef;padding:12px;border-radius:9px}.rw-counts strong{font-size:22px}.rw-counts span{font-size:12px;color:#74697e}.rw-save{position:sticky;bottom:0;background:#fff;border-block:1px solid #e4dced;z-index:2}.rw-save>span{flex:1}.rw-history{padding-bottom:22px}.rw-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;padding:0 22px}.rw-calendar>span{text-align:center;font-size:12px;color:#776c84}.rw-calendar button{border:1px solid #e4dced;background:#faf9fd;border-radius:8px;padding:10px;display:grid;gap:7px;text-align:left;cursor:pointer;color:#322740;min-height:90px}.rw-calendar button[aria-pressed=true]{border:2px solid #7756ce;background:#f0eafb}.rw-calendar button:disabled{opacity:.45;cursor:default}.rw-calendar button span{font-size:12px}.rw-calendar button small{font-size:11px;color:#776d82}.rw-student-list{padding:0 22px 22px;display:grid;gap:10px}.rw-student-card{width:100%;display:flex;justify-content:space-between;align-items:center;gap:14px;padding:18px;border:1px solid #e5deef;border-radius:12px;background:#fff;color:#302740;text-align:left;cursor:pointer}.rw-student-card:hover{background:#faf7ff;border-color:#aa97df}.rw-student-card strong,.rw-student-card small{display:block}.rw-student-card strong{font-size:15px}.rw-student-card small{font-size:12px;color:#746a80;margin-top:7px}.rw-student-card>span:last-child{display:flex;align-items:center;gap:8px;font-size:12px;color:#6848b8}.fee-months{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:18px 0}.fee-months button{display:grid;gap:10px;border:1px solid #e3dced;background:#fff;color:#2e253e;padding:16px;text-align:left;border-radius:12px;cursor:pointer}.fee-months button:hover{border-color:#8262cc}.fee-months strong{font-size:15px}.fee-months small{color:#756b82}.fee-months .sp-badge{justify-self:start}.fee-year{max-width:160px}.rw-help{padding:12px;background:#f6f2fc;color:#6c5b83;border-radius:8px;font-size:13px}
+@media(max-width:700px){.rw-heading,.rw-controls,.rw-day-heading,.rw-save{padding:16px;gap:12px}.rw-controls label{flex:1;min-width:130px}.rw-controls input,.rw-controls select{width:100%;box-sizing:border-box}.rw-counts{grid-template-columns:repeat(3,1fr);padding:0 16px 16px}.rw-calendar{padding:0 12px;gap:3px}.rw-calendar button{padding:6px 3px;min-height:62px}.rw-calendar button span{font-size:9px}.rw-calendar button small{display:none}.rw-calendar>span{font-size:10px}.rw-save>span{flex-basis:100%}.rw-save .button{flex:1;justify-content:center;padding:10px;font-size:12px}.rw-student-list{padding:0 14px 14px}.rw-student-card{padding:14px;align-items:flex-start}.rw-student-card>span:last-child{font-size:0}.rw-student-card>span:last-child svg{min-width:16px}.fee-months{grid-template-columns:repeat(2,minmax(0,1fr))}.fee-months button{padding:12px}}
+
+@media(max-width:700px){.register-workspace .table-scroll table{display:block;min-width:0;width:100%}.register-workspace .table-scroll thead{display:none}.register-workspace .table-scroll tbody{display:block}.register-workspace .table-scroll tr{display:grid;grid-template-columns:minmax(0,1fr) 120px;padding:12px;gap:4px;border-bottom:1px solid #e6dfee}.register-workspace .table-scroll td{display:block;padding:4px;border:0;white-space:normal;min-width:0}.register-workspace .table-scroll td:nth-child(1){grid-column:1;grid-row:2}.register-workspace .table-scroll td:nth-child(2){grid-column:1;grid-row:1}.register-workspace .table-scroll td:nth-child(3){grid-column:1;grid-row:3}.register-workspace .table-scroll td:nth-child(3)::before{content:"Section: "}.register-workspace .table-scroll td:nth-child(4){grid-column:2;grid-row:1/span 2;align-self:center}.register-workspace .table-scroll td:nth-child(5){grid-column:2;grid-row:3;font-size:11px}.register-workspace .rw-mark{width:100%;min-width:0;box-sizing:border-box}}
+
+/* One clear, keyboard-accessible choice per student. */
+.rw-mark-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;border:0;padding:0;margin:0;min-width:228px;max-width:276px}
+.rw-visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.register-workspace .rw-mark-choice{position:relative;display:block;margin:0;cursor:pointer;--mark-color:#166534;--mark-fill:#e8f7ed;--mark-border:#a5d9b7;--mark-solid:#16834a;--mark-hover:#d4efdf;--mark-shadow:#16834a26}
+.register-workspace .rw-mark-choice.absent{--mark-color:#a52838;--mark-fill:#fff0f1;--mark-border:#efb5bd;--mark-solid:#c6384a;--mark-hover:#ffe0e5;--mark-shadow:#c6384a26}
+.register-workspace .rw-mark-choice.leave{--mark-color:#6740aa;--mark-fill:#f2ecfc;--mark-border:#d2bcef;--mark-solid:#7950bd;--mark-hover:#e8ddf9;--mark-shadow:#7950bd26}
+.register-workspace .rw-mark-choice input{position:absolute;inset:0;width:100%;height:100%;min-height:0;margin:0;padding:0;opacity:0;z-index:1;cursor:pointer}
+.rw-mark-box{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:62px;box-sizing:border-box;border:1px solid var(--mark-border);border-radius:11px;background:var(--mark-fill);color:var(--mark-color);transition:background .15s,border-color .15s,box-shadow .15s,color .15s}
+.register-workspace .rw-mark-box strong{color:inherit;font-size:18px;line-height:1.2;font-weight:700;letter-spacing:.1px}
+.register-workspace .rw-mark-choice.leave strong{font-size:14px}
+.rw-mark-box small{color:inherit;font-size:10px;line-height:1.3;font-weight:500}
+.rw-mark-check{position:absolute;right:5px;top:5px;opacity:0}
+.rw-mark-choice:hover .rw-mark-box{border-color:var(--mark-solid);background:var(--mark-hover)}
+.rw-mark-choice input:checked+.rw-mark-box{border-color:var(--mark-solid);box-shadow:0 3px 9px var(--mark-shadow),inset 0 0 0 1px var(--mark-solid);color:#fff;background:var(--mark-solid)}
+.rw-mark-choice input:checked+.rw-mark-box .rw-mark-check{opacity:1}
+.rw-mark-choice input:focus-visible+.rw-mark-box{outline:3px solid #b6a3ed;outline-offset:3px}
+.rw-mark-options:disabled{opacity:.6}.rw-mark-options:disabled input{cursor:wait}
+.rw-previous-mark{grid-column:1/-1;font-size:11px;color:#756d82}
+.rw-save-state{font-size:12px;color:#756d82;white-space:nowrap}
+.rw-save-state.is-unsaved{color:#6845ac}
+.rw-undo-mark{display:block;border:0;background:none;padding:5px 0;color:#6845ac;text-decoration:underline;font:inherit;font-size:11px;cursor:pointer}
+@media(max-width:700px){
+  .register-workspace .table-scroll tr{grid-template-columns:minmax(0,1fr) auto;padding:16px;gap:5px 12px}
+  .register-workspace .table-scroll td:nth-child(1){grid-column:1;grid-row:2}
+  .register-workspace .table-scroll td:nth-child(2){grid-column:1;grid-row:1}
+  .register-workspace .table-scroll td:nth-child(3){grid-column:1;grid-row:3}
+  .register-workspace .table-scroll td:nth-child(4){grid-column:1/-1;grid-row:4;padding-top:10px}
+  .register-workspace .table-scroll td:nth-child(5){grid-column:2;grid-row:1/span 3;text-align:right;align-self:start}
+  .rw-mark-options{min-width:0;max-width:none;width:100%;gap:10px}
+  .rw-mark-box{min-height:64px}
+  .rw-undo-mark{margin-left:auto}
+}
+@media(prefers-reduced-motion:reduce){.rw-mark-box{transition:none}}
+
+.register-workspace tbody td:nth-child(2)>strong{font-size:14px;font-weight:600;color:#30263f}
+
+/* Review the full register before committing attendance. */
+.rw-save-review{display:block;padding:20px 22px;border-top:1px solid #d9e8df;box-shadow:0 -5px 20px #293b3010}
+.rw-review-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.rw-review-heading h3{font-size:16px;color:#253c31;margin:0 0 5px}
+.rw-review-heading p{font-size:12px;color:#74697e;margin:0;line-height:1.5}
+.rw-review-state{font-size:11px;padding:7px 10px;border-radius:7px;background:#edf6f0;color:#286344;white-space:nowrap}
+.rw-review-state.is-pending{background:#f2edfc;color:#6845ac}
+.rw-review-totals{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin:0 0 14px}
+.rw-review-totals>div{display:flex;flex-direction:column;gap:7px;padding:12px 14px;border:1px solid #e1dce9;border-radius:10px;background:#faf9fc;color:#514560}
+.rw-review-totals dt{font-size:11px;font-weight:500}
+.rw-review-totals dd{margin:0;font-size:23px;line-height:1.1;font-weight:700;font-variant-numeric:tabular-nums}
+.rw-review-totals .rw-total-total-students{background:#f0f4f2;color:#294737;border-color:#d5e1da}
+.rw-review-totals .rw-total-present{background:#e8f7ed;color:#166534;border-color:#b7dfc5}
+.rw-review-totals .rw-total-absent{background:#fff0f1;color:#a52838;border-color:#f0c5cc}
+.rw-review-totals .rw-total-leave{background:#f2ecfc;color:#6740aa;border-color:#d9c9ef}
+.rw-review-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;border-top:1px solid #e9e4ee;padding-top:14px}
+.rw-review-actions>span{flex:1;color:#756b82;font-size:12px;line-height:1.5}
+.rw-incomplete,.rw-filter-note{font-size:12px;line-height:1.5;color:#756b82;margin:0 0 12px}
+.rw-save-confirmation,.rw-save-error{display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.5;margin:0 0 14px;padding:10px 12px;border-radius:8px}
+.rw-save-confirmation{background:#e8f7ed;color:#166534}.rw-save-confirmation svg{flex-shrink:0}
+.rw-save-error{background:#fff0f1;color:#a52838}
+@media(max-width:700px){
+  .rw-save-review{position:static;padding:16px}
+  .rw-review-heading{align-items:flex-start;flex-wrap:wrap}
+  .rw-review-totals{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  .rw-review-totals>div{padding:10px}
+  .rw-review-totals dt{font-size:10px}
+  .rw-review-totals dd{font-size:21px}
+  .rw-review-actions{flex-wrap:wrap;gap:10px}
+  .rw-review-actions>span{flex-basis:100%}
+}

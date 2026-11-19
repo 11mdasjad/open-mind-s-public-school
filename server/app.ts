@@ -1,3 +1,5 @@
+import {registerFeeOffice} from './fee-office';
+import {saveVersion,serial,FeeOfficeError} from './fee-office-core';
 import {emitSchoolNotification,registerNotificationRoutes} from './notifications';
 import express, {
   type Request,
@@ -24,6 +26,10 @@ import {schoolSettings,effectiveAccess,moduleForPath,isDelegated,hasDelegatedRea
 import {registerMemberRoutes} from './members';
 import {registerWorkflowRoutes} from './workflow';
 import {activityMiddleware,registerActivityRoutes} from './activity';
+import {registerStudentProfiles} from './student-profiles';
+import {allowedDraftStudents, invoiceScope} from './student-register';
+import {classKey} from '../shared/student-register';
+import {readFeeSchedule} from './fee-schedule';
 
 declare global {
   namespace Express {
@@ -149,6 +155,9 @@ app.use("/api", (req, res, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
     const allowed = [
       process.env.APP_ORIGIN,
+      ...(!production
+        ? ["http://localhost:5173", "http://127.0.0.1:5173"]
+        : []),
       `http://${req.headers.host}`,
       `https://${req.headers.host}`,
     ];
@@ -169,7 +178,7 @@ app.get(
       res.status(503).json({
         ok: false,
         database: "disconnected",
-        error: "Database connection failed. Please check DATABASE_URL in environment variables.",
+        error: "The school database is temporarily unavailable. Please try again shortly.",
       });
     }
   }),
@@ -395,7 +404,7 @@ const studentScope = (req: Request): any =>
     : req.account.role === "Parent"
       ? { parentId: req.account.id }
       : {};
-async function allowedStudents(req: Request) {
+async function queryAllowedStudents(req: Request) {
   if(req.account.permissions?.students==='none')return [];
   if (
     privileged(req.account) ||
@@ -424,8 +433,11 @@ async function allowedStudents(req: Request) {
     });
   return [];
 }
-async function requireStudent(req: Request, studentId: string) {
-  if (!(await allowedStudents(req)).some((s) => s.id === studentId))
+function allowedStudents(req: Request): ReturnType<typeof queryAllowedStudents> {
+  return (req as any).studentScopePromise ||= queryAllowedStudents(req);
+}
+async function requireStudent(req: Request, studentId: string | null) {
+  if (!(await allowedStudents(req)).some((s) => s.id === studentId) && !(await allowedDraftStudents(req)).some(s=>s.id===studentId))
     fail(403, "Student is outside your authorised records.");
 }
 const safeUser = (u: any) => ({
@@ -572,11 +584,239 @@ router.get(
         ...s,
         details:
           privileged(req.account) ||
-          ["Student", "Parent", "Receptionist"].includes(req.account.role)
+          ["Student", "Parent", "Receptionist", "Teacher", "Class Teacher"].includes(req.account.role)
             ? details
             : {},
       })),
     );
+  }),
+);
+const studentDraftAccess = ["Super Admin", "School Admin", "Principal"];
+router.get('/students/register', wrap(async(req,res)=>{
+  const [students,drafts]=await Promise.all([allowedStudents(req),allowedDraftStudents(req)]);
+  res.json([...students.map(s=>({...s,isDraft:false})),...drafts]);
+}));
+router.get('/attendance/register', wrap(async(req,res)=>{
+  const month=z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).parse(req.query.month);
+  const selected=z.string().min(1).parse(req.query.className);
+  const [students,drafts]=await Promise.all([allowedStudents(req),allowedDraftStudents(req)]);
+  const roster=[...students,...drafts].filter(s=>classKey(s.className)===classKey(selected)&&(!req.query.section||s.section===req.query.section));
+  const records=await db.attendance.findMany({where:{personKey:{in:roster.map(s=>s.id)},period:'Daily',date:{gte:`${month}-01`,lte:`${month}-31`}},orderBy:{date:'asc'}});
+  res.json({month,className:selected,records});
+}));
+router.get(
+  "/student-drafts",
+  wrap(async (req, res) => {
+    permit(req, studentDraftAccess);
+    const records = await db.entry.findMany({
+      where: { module: "studentDrafts", archived: false },
+      orderBy: { createdAt: "asc" },
+    });
+    res.json(records);
+  }),
+);
+router.post(
+  "/student-drafts/import",
+  wrap(async (req, res) => {
+    permit(req, studentDraftAccess);
+    const { records } = z
+      .object({
+        records: z.array(z.record(z.string(), z.any())).min(1).max(500),
+      })
+      .parse(req.body);
+    const incoming = records.map((record) => ({
+      className: z.string().trim().min(1).parse(record.className),
+      rollNumber: String(record.details?.rollNumber || "").trim().toLowerCase(),
+    }));
+    const rollKeys = incoming
+      .filter((record) => record.rollNumber)
+      .map((record) => `${record.className.toLowerCase()}\0${record.rollNumber}`);
+    if (new Set(rollKeys).size !== rollKeys.length)
+      fail(409, "This import contains duplicate roll numbers in the same class.");
+    const classNames = [...new Set(incoming.map((record) => record.className))];
+    const [existingStudents, existingDrafts] = await Promise.all([
+      db.student.findMany({
+        where: { className: { in: classNames }, archived: false },
+        select: { className: true, details: true },
+      }),
+      db.entry.findMany({
+        where: { module: "studentDrafts", archived: false },
+        select: { data: true },
+      }),
+    ]);
+    const existingRollKeys = new Set(
+      [
+        ...existingStudents.map((student) => ({
+          className: student.className,
+          rollNumber: String((student.details as any)?.rollNumber || ""),
+        })),
+        ...existingDrafts
+          .map((draft) => draft.data as any)
+          .filter((draft) => classNames.includes(String(draft.className)))
+          .map((draft) => ({
+            className: String(draft.className),
+            rollNumber: String(draft.details?.rollNumber || ""),
+          })),
+      ]
+        .filter((record) => record.rollNumber)
+        .map((record) =>
+          `${record.className.toLowerCase()}\0${record.rollNumber.trim().toLowerCase()}`,
+        ),
+    );
+    if (rollKeys.some((key) => existingRollKeys.has(key)))
+      fail(409, "Some students in this class have already been imported.");
+    const data = records.map((record) => {
+      const className = String(record.className).trim();
+      const title = String(
+        record.name || record.details?.rollNumber || "Unnamed student",
+      ).trim();
+      return {
+        module: "studentDrafts",
+        title: title || "Unnamed student",
+        status: "Incomplete",
+        data: { ...record, className },
+        userId: req.account.id,
+      };
+    });
+    const imported = await db.entry.createMany({ data });
+    await audit(
+      req,
+      "import",
+      "student-drafts",
+      `${imported.count} incomplete student records`,
+    );
+    res.status(201).json({ imported: imported.count });
+  }),
+);
+router.put(
+  "/student-drafts/:id",
+  wrap(async (req, res) => {
+    permit(req, studentDraftAccess);
+    const input = z
+      .object({
+        name: z.string().max(1000).default(""),
+        email: z.string().max(1000).default(""),
+        dob: z.string().max(1000).default(""),
+        gender: z.string().max(1000).default(""),
+        className: z.string().trim().min(1).max(1000),
+        section: z.string().max(1000).default(""),
+        session: z.string().max(1000).default(""),
+        parentName: z.string().max(1000).default(""),
+        parentEmail: z.string().max(1000).default(""),
+        phone: z.string().max(1000).default(""),
+        address: z.string().max(1000).default(""),
+        details: z.record(z.string(), z.any()).default({}),
+      })
+      .strict()
+      .parse(req.body);
+    const existing = await db.entry.findFirst({
+      where: {
+        id: req.params.id,
+        module: "studentDrafts",
+        archived: false,
+      },
+    });
+    if (!existing) fail(404, "Incomplete student record not found.");
+    const record = await db.entry.update({
+      where: { id: existing.id },
+      data: {
+        title: input.name.trim() || String(input.details.rollNumber || "Unnamed student"),
+        data: input,
+      },
+    });
+    await audit(req, "update", "student-draft", record.id);
+    res.json(record);
+  }),
+);
+router.post(
+  "/student-drafts/:id/complete",
+  wrap(async (req, res) => {
+    permit(req, studentDraftAccess);
+    const draft = await db.entry.findFirst({
+      where: {
+        id: req.params.id,
+        module: "studentDrafts",
+        archived: false,
+      },
+    });
+    if (!draft) fail(404, "Incomplete student record not found.");
+    const data = studentSchema.parse(draft.data);
+    if (data.email === data.parentEmail)
+      fail(400, "Student and parent need different email addresses.");
+    const activationTokens: { email: string; token: string }[] = [];
+    const student = await db.$transaction(async (tx) => {
+      async function account(email: string, name: string, role: string) {
+        const existing = await tx.user.findUnique({ where: { email } });
+        if (existing) {
+          if (role !== "Parent" || existing.role !== "Parent")
+            fail(409, "Email already belongs to another account.");
+          return existing;
+        }
+        const user = await tx.user.create({
+          data: {
+            email,
+            name,
+            role,
+            active: role !== "Parent",
+            passwordHash: await bcrypt.hash(randomBytes(32).toString("hex"), 12),
+          },
+        });
+        if (role === "Parent") return user;
+        const token = randomBytes(32).toString("hex");
+        await tx.passwordReset.create({
+          data: {
+            tokenHash: hash(token),
+            userId: user.id,
+            expiresAt: new Date(Date.now() + 86400000),
+          },
+        });
+        activationTokens.push({ email, token });
+        return user;
+      }
+      const parent = await account(data.parentEmail, data.parentName, "Parent");
+      const user = await account(data.email, data.name, "Student");
+      const record = await tx.student.create({
+        data: {
+          ...data,
+          admissionNo: `OM-${new Date().getFullYear()}-${id().slice(0, 8)}`,
+          parentId: parent.id,
+          userId: user.id,
+        },
+      });
+      await tx.entry.update({
+        where: { id: draft.id },
+        data: { archived: true },
+      });
+      const files = await tx.entry.findMany({where: {module: 'studentDocuments', data: {path: ['profileId'], equals: draft.id}}});
+      for (const file of files) await tx.entry.update({where: {id: file.id}, data: {studentId: record.id, data: {...file.data as any, profileId: record.id}}});
+      await tx.invoice.updateMany({where:{draftStudentId:draft.id},data:{studentId:record.id,draftStudentId:null}});
+      await tx.billingAssignment.updateMany({where:{draftStudentId:draft.id},data:{studentId:record.id,draftStudentId:null,profileKey:record.id}});
+      await tx.feeCollection.updateMany({where:{draftStudentId:draft.id},data:{studentId:record.id,draftStudentId:null}});
+      await tx.attendance.updateMany({where:{personKey:draft.id},data:{personKey:record.id,studentId:record.id}});
+      return record;
+    });
+    await audit(req, "complete-import", "student", student.id);
+    res.status(201).json({ record: student, activationTokens });
+  }),
+);
+router.delete(
+  "/student-drafts/:id",
+  wrap(async (req, res) => {
+    permit(req, studentDraftAccess);
+    const record = await db.entry.findFirst({
+      where: {
+        id: req.params.id,
+        module: "studentDrafts",
+        archived: false,
+      },
+    });
+    if (!record) fail(404, "Incomplete student record not found.");
+    await db.entry.update({
+      where: { id: record.id },
+      data: { archived: true },
+    });
+    await audit(req, "archive", "student-draft", record.id);
+    res.json({ ok: true });
   }),
 );
 router.post(
@@ -866,10 +1106,13 @@ router.post(
       .parse(req.body);
     if (d.date > date())
       fail(400, "Attendance cannot be marked in the future.");
+    const [registered, drafts] = await Promise.all([allowedStudents(req), allowedDraftStudents(req)]);
+    const registeredIds=new Set(registered.map(s=>s.id)), draftIds=new Set(drafts.map(s=>s.id));
+    if(new Set(d.records.map(r=>r.studentId||r.employeeId)).size!==d.records.length) fail(400,'Duplicate attendance records.');
     for (const r of d.records) {
       if (!!r.studentId === !!r.employeeId)
         fail(400, "Choose one person type.");
-      if (r.studentId) await requireStudent(req, r.studentId);
+      if (r.studentId && !registeredIds.has(r.studentId) && !draftIds.has(r.studentId)) fail(403,'Student is outside your authorised records.');
       if (r.employeeId) permit(req, [...admins, "HR Manager"]);
     }
     await db.$transaction(
@@ -885,6 +1128,7 @@ router.post(
           },
           create: {
             ...r,
+            studentId: r.studentId && draftIds.has(r.studentId) ? null : r.studentId,
             personKey,
             date: d.date,
             period: d.period,
@@ -939,13 +1183,14 @@ router.post(
 router.get(
   "/fees",
   wrap(async (req, res) => {
-    permit(req, [...admins, "Accountant", "Parent", "Student"]);
-    const ids = (await allowedStudents(req)).map((s) => s.id);
+    permit(req, [...admins, "Accountant", "Fee Clerk", "Parent", "Student"]);
+    const [students,drafts]=await Promise.all([allowedStudents(req),allowedDraftStudents(req)]);
     res.json(
       await db.invoice.findMany({
-        where: { studentId: { in: ids } },
+        where: invoiceScope(students,drafts),
         include: {
           student: { select: { name: true } },
+          draftStudent: {select:{title:true}},
           payments: { include: { refunds: true } },
         },
         orderBy: { createdAt: "desc" },
@@ -953,6 +1198,21 @@ router.get(
     );
   }),
 );
+router.get('/fees/schedule',wrap(async(req,res)=>{
+  const session=z.string().trim().min(1).max(80).parse(req.query.session||(await schoolSettings()).academicSession);
+  res.json({...await readFeeSchedule(session),canEditTransport:req.account.permissions.feeStructures==='manage'&&[...admins,'Accountant'].includes(req.account.role)});
+}));
+router.put('/fees/schedule/transport',wrap(async(req,res)=>{
+  permit(req,['Super Admin']);
+  if(req.account.permissions.feeStructures!=='manage')fail(403,'Fee structure management access is required.');
+  const data=z.object({session:z.string().trim().min(1).max(80),routes:z.array(z.object({route:z.string().trim().min(1).max(100),amount:z.number().positive().max(100000)})).min(1).max(100)}).parse(req.body);
+  if(new Set(data.routes.map(rate=>rate.route.toLowerCase())).size!==data.routes.length)fail(400,'Each transport route must be unique.');
+  const id=`transport-fees:${data.session}`;
+  if(await db.feeVersion.count({where:{session:data.session}})){const rows=await db.feeVersion.findMany({where:{session:data.session,kind:'route'},orderBy:{version:'desc'}});await serial(async tx=>{for(const rate of data.routes){const previous=rows.find(r=>(r.data as any).name===rate.route);if(!previous)fail(400,'Create new routes in Transport Fees.');await saveVersion(tx,{key:previous!.key,kind:'route',session:data.session,effectiveDate:date(),active:true,data:{...previous!.data as any,amount:Math.round(rate.amount*100)}},req.account.id);}});res.json({ok:true});return;}
+
+  await db.configuration.upsert({where:{id},create:{id,data:{...data,frequency:'Monthly',currency:'INR'}},update:{data:{...data,frequency:'Monthly',currency:'INR'}}});
+  await audit(req,'update','transport-fees',id);res.json({ok:true});
+}));
 router.post(
   "/fees",
   wrap(async (req, res) => {
@@ -964,12 +1224,30 @@ router.post(
         amount: money.refine((n) => n > 0),
         dueDate: iso,
         session: str,
+        scheduleKind: z.enum(['tuition','transport']).optional(),
+        transportRoute: z.string().max(100).optional(),
       })
       .parse(req.body);
     await requireStudent(req, d.studentId);
-    const r = await db.invoice.create({
-      data: { ...d, number: `INV-${id()}` },
-    });
+    const registeredStudents=await allowedStudents(req);
+    const registered=registeredStudents.some(s=>s.id===d.studentId);
+    const {scheduleKind,transportRoute,...invoiceData}=d;
+    if(scheduleKind){
+      const schedule=await readFeeSchedule(d.session);
+      const student=registeredStudents.find(s=>s.id===d.studentId)||(await allowedDraftStudents(req)).find(s=>s.id===d.studentId);
+      const rate=scheduleKind==='tuition'?schedule.tuition.find(rate=>classKey(rate.className)===classKey(student?.className)):schedule.transport.find(rate=>rate.route===transportRoute);
+      if(!rate)fail(400,'No fee rate is configured for the selected class, route and academic session.');
+      invoiceData.amount=Math.round(rate!.amount*100);
+      invoiceData.title=scheduleKind==='tuition'?'Tuition fee':`Transport fee · ${transportRoute}`;
+    }
+    const r = await db.$transaction(async tx=>{
+      const owner=registered?{studentId:d.studentId}:{draftStudentId:d.studentId};
+      const title=scheduleKind?{startsWith:scheduleKind==='tuition'?'Tuition fee':'Transport fee · '}:invoiceData.title;
+      const existing=await tx.invoice.findMany({where:{...owner,session:d.session,dueDate:{startsWith:d.dueDate.slice(0,7)}}});
+      const head=invoiceData.title.toLowerCase().startsWith('tuition fee')?'Tuition Fee':invoiceData.title.toLowerCase().startsWith('transport fee')?'Transport Fee':invoiceData.title;
+      if(existing.some(i=>i.title===invoiceData.title||(scheduleKind&&i.title.startsWith(scheduleKind==='tuition'?'Tuition fee':'Transport fee'))||Array.isArray(i.items)&&(i.items as any[]).some(item=>item.category.toLowerCase()===head.toLowerCase())))fail(409,'This fee is already assigned to this student for the selected month.');
+      return tx.invoice.create({data:{...invoiceData,originalAmount:invoiceData.amount,createdBy:req.account.id,studentId:registered?d.studentId:null,draftStudentId:registered?null:d.studentId,number:`INV-${id()}`}});
+    },{isolationLevel:'Serializable'});
     await audit(req, "create", "invoice", r.id);
     res.status(201).json(r);
   }),
@@ -1561,14 +1839,14 @@ router.get(
 router.get(
   "/dashboard",
   wrap(async (req, res) => {
-    const students = await allowedStudents(req),
-      ids = students.map((s) => s.id);
+    const [registered,drafts]=await Promise.all([allowedStudents(req),allowedDraftStudents(req)]);
+    const students=[...registered,...drafts], ids=students.map(s=>s.id);
     const invoices = await db.invoice.findMany({
-      where: { studentId: { in: ids } },
+      where: invoiceScope(registered,drafts),
       include: { payments: { include: { refunds: true } } },
     });
     const attendance = await db.attendance.findMany({
-      where: { date: date(), studentId: { in: ids } },
+      where: { date: date(), personKey: { in: ids }, period:'Daily' },
     });
     const total = invoices.reduce((s, i) => s + i.amount, 0),
       collected = invoices.reduce(
@@ -1613,6 +1891,7 @@ router.get(
     });
   }),
 );
+registerFeeOffice(router,{wrap,allowedStudents});
 registerExtensions(router, {
   wrap,
   permit,
@@ -1622,7 +1901,7 @@ registerExtensions(router, {
   allowedStudents,
   scopedEntries,
 });
-registerWorkflowRoutes(router,{wrap,permit,fail,audit,allowedStudents,scopedEntries});
+registerWorkflowRoutes(router,{wrap,permit,fail,audit,allowedStudents,scopedEntries,requireStudent});
 registerNotificationRoutes(router,{wrap,fail});
 registerAccessRoutes(router,{wrap,permit,fail,audit});
 registerActivityRoutes(router,{wrap,permit,fail});
@@ -1638,6 +1917,7 @@ const upload = multer({
       ["application/pdf", "image/jpeg", "image/png"].includes(file.mimetype),
     ),
 });
+registerStudentProfiles(router, {wrap, fail, requireStudent, upload, audit});
 router.post(
   "/documents",
   upload.single("file"),
@@ -1703,17 +1983,17 @@ router.get(
     let title = "",
       lines: string[] = [];
     if (kind === "receipt") {
-      permit(req, [...admins, "Accountant", "Parent", "Student"]);
+      permit(req, [...admins, "Accountant", "Fee Clerk", "Parent", "Student"]);
       const p = await db.payment.findUnique({
         where: { id },
-        include: { invoice: { include: { student: true } } },
+        include: { invoice: { include: { student: true, draftStudent: true } } },
       });
       if (!p) fail(404, "Receipt not found.");
-      await requireStudent(req, p!.invoice.studentId);
+      await requireStudent(req, p!.invoice.studentId || p!.invoice.draftStudentId);
       title = "Fee receipt";
       lines = [
         p!.receipt,
-        `Student: ${p!.invoice.student.name}`,
+        `Student: ${p!.invoice.student?.name || p!.invoice.draftStudent?.title || 'Student'}`,
         `Invoice: ${p!.invoice.number}`,
         p!.invoice.title,
         `Amount: INR ${(p!.amount / 100).toFixed(2)}`,
@@ -1814,10 +2094,11 @@ app.use(express.static(path.resolve("dist")));
 app.get("*", (_req, res) => res.sendFile(path.resolve("dist/index.html")));
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   if (res.headersSent) return;
+  const databaseUnavailable = ['P1000','P1001','P1002','P1008','P1017'].includes(err.code);
   const status =
     err instanceof z.ZodError
       ? 400
-      : err.status ||
+      : databaseUnavailable ? 503 : err.status ||
         (err.code === "P2002"
           ? 409
           : err.code === "P2025"
@@ -1827,7 +2108,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
               : err.code === "LIMIT_FILE_SIZE"
                 ? 400
                 : 500);
-  if (status === 500) console.error("Request failed", err.code || err.name);
+  if (status === 500) console.error("Request failed", err.code || err.name, process.env.NODE_ENV === "test" ? err.message : "");
   res
     .status(status)
     .json({
@@ -1836,7 +2117,7 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
           ? err.issues
               .map((i) => `${i.path.join(".")}: ${i.message}`)
               .join("; ")
-          : err instanceof HttpError
+          : err instanceof HttpError || err instanceof FeeOfficeError
             ? err.message
             : err.code === "P2002"
               ? "A record with these details already exists."
@@ -1846,8 +2127,8 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
                   ? "File exceeds 5 MB."
                   : status === 404
                     ? "Record not found."
-                    : err.message && (err.message.includes("DATABASE_URL") || err.message.includes("Can't reach database") || err.code === "P1001" || err.code === "P1000")
-                      ? "Database connection not configured or unreachable. Please set DATABASE_URL in environment variables."
+                    : databaseUnavailable
+                      ? "The school database is temporarily unavailable. Please try again shortly."
                       : "The request could not be completed.",
     });
 });

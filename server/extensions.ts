@@ -1,5 +1,8 @@
+import {appendAdjustment} from './fee-office-core';
 import { z } from "zod";
 import { db } from "./db";
+import {allowedDraftStudents,invoiceScope} from './student-register';
+import {classKey} from '../shared/student-register';
 import { admins } from "../shared/modules";
 import {
   gateway,
@@ -59,14 +62,14 @@ export function registerExtensions(
         permit(req, [...admins, "Accountant", "Parent", "Student"]);
         rows = (
           await db.invoice.findMany({
-            where: { studentId: { in: ids } },
+            where: invoiceScope(students,await allowedDraftStudents(req)),
             include: {
-              student: true,
+              student: true, draftStudent:true,
               payments: { include: { refunds: true } },
             },
           })
         ).map((i) => ({
-          Student: i.student.name,
+          Student: i.student?.name || i.draftStudent?.title || 'Student',
           Invoice: i.number,
           Title: i.title,
           TotalINR: i.amount / 100,
@@ -251,7 +254,7 @@ export function registerExtensions(
   router.post(
     "/fees/:id/concession",
     wrap(async (req: any, res: any) => {
-      permit(req, [...admins, "Accountant"]);
+      permit(req, ["Super Admin"]);
       const d = z
         .object({
           amount: z.coerce.number().positive().max(10000000),
@@ -290,10 +293,7 @@ export function registerExtensions(
               },
             },
           });
-          return tx.invoice.update({
-            where: { id: invoice.id },
-            data: { amount: { decrement: amount } },
-          });
+          return appendAdjustment(tx,invoice,"Discount",-amount,d.reason,req.account.id);
         },
         { isolationLevel: "Serializable" },
       );
@@ -366,7 +366,8 @@ export function registerExtensions(
         include: { payments: { include: { refunds: true } } },
       });
       if (!invoice) return fail(404, "Invoice not found.");
-      await requireStudent(req, invoice.studentId);
+      await requireStudent(req, invoice.studentId || invoice.draftStudentId);
+      if(['Draft','Cancelled'].includes(invoice.issueStatus))fail(409,'Only issued invoices can be paid.');
       const amount =
         invoice.amount -
         invoice.payments.reduce(
@@ -412,7 +413,7 @@ export function registerExtensions(
         include: { invoice: true },
       });
       if (!order) return fail(404, "Order not found.");
-      await requireStudent(req, order.invoice.studentId);
+      await requireStudent(req, order.invoice.studentId || order.invoice.draftStudentId);
       if (
         !process.env.RAZORPAY_KEY_SECRET ||
         !validSignature(
@@ -558,9 +559,8 @@ export function registerExtensions(
       });
       if (!structure) return fail(404, "Fee structure not found.");
       const f = structure.data as any;
-      const students = await db.student.findMany({
-        where: { className: f.className, session: f.session, archived: false },
-      });
+      const [registered,drafts]=await Promise.all([allowedStudents(req),allowedDraftStudents(req)]);
+      const students=[...registered.map((student:any)=>({...student,isDraft:false})),...drafts].filter(student=>classKey(student.className)===classKey(f.className)&&(!student.session||student.session===f.session));
       if (!students.length)
         fail(400, "No students match this class and session.");
       const title = `${structure.title} · ${d.period}`;
@@ -578,6 +578,10 @@ export function registerExtensions(
               409,
               "This fee structure was already assigned for this period.",
             );
+          const billed = f.frequency === 'Monthly' ? await tx.invoice.findMany({where:{OR:[{studentId:{in:students.filter(s=>!s.isDraft).map(s=>s.id)}},{draftStudentId:{in:students.filter(s=>s.isDraft).map(s=>s.id)}}],session:f.session,dueDate:{startsWith:d.dueDate.slice(0,7)}},select:{studentId:true,draftStudentId:true,title:true,items:true}}) : [];
+          const billedIds=new Set(billed.filter(invoice=>invoice.title.startsWith(structure.title)||Array.isArray(invoice.items)&&(invoice.items as any[]).some(item=>item.category?.toLowerCase()===structure.title.toLowerCase())).map(invoice=>invoice.studentId||invoice.draftStudentId));
+          const unbilled=students.filter(student=>!billedIds.has(student.id));
+          if(!unbilled.length)fail(409,'This monthly fee is already assigned to all matching students.');
           await tx.entry.create({
             data: {
               module: "feeAssignments",
@@ -586,18 +590,19 @@ export function registerExtensions(
               userId: req.account.id,
             },
           });
-          for (const s of students)
+          for (const s of unbilled)
             await tx.invoice.create({
               data: {
                 number: `INV-${randomBytes(8).toString("hex")}`,
-                studentId: s.id,
+                studentId: s.isDraft ? null : s.id,
+                draftStudentId: s.isDraft ? s.id : null,
                 title,
                 amount: Math.round(Number(f.amount) * 100),
                 dueDate: d.dueDate,
                 session: f.session,
               },
             });
-          return students.length;
+          return unbilled.length;
         },
         { isolationLevel: "Serializable" },
       );

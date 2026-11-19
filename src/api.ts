@@ -1,9 +1,19 @@
 let csrf = "";
-export async function api(path: string, method = "GET", body?: any) {
+const inFlight = new Map<string, Promise<any>>();
+export function api(path: string, method = "GET", body?: any): Promise<any> {
+  if (method !== 'GET') { inFlight.clear(); return sendRequest(path, method, body); }
+  const existing=inFlight.get(path);
+  if(existing)return existing;
+  const request=sendRequest(path,method,body).finally(()=>{if(inFlight.get(path)===request)inFlight.delete(path);});
+  inFlight.set(path,request);
+  return request;
+}
+async function sendRequest(path: string, method = "GET", body?: any) {
   const multipart = body instanceof FormData;
   const response = await fetch(`/api${path}`, {
     method,
     credentials: "same-origin",
+    cache: 'no-store',
     headers: {
       "x-school-request": "1",
       ...(csrf ? { "x-csrf-token": csrf } : {}),

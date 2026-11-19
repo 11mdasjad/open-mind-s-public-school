@@ -19,6 +19,7 @@ export const roles = [
   "Principal",
   "Vice Principal",
   "Accountant",
+  "Fee Clerk",
   "HR Manager",
   "Teacher",
   "Class Teacher",

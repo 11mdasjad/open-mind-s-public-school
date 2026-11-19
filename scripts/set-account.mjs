@@ -1,7 +1,12 @@
 import 'dotenv/config';
 import {PrismaClient} from '@prisma/client';
+import {PrismaPg} from '@prisma/adapter-pg';
+import {postgresConnection} from './postgres-connection.mjs';
 import bcrypt from 'bcryptjs';
-const db=new PrismaClient();
+const url=new URL(process.env.DATABASE_URL);
+const db=url.searchParams.has('sslrootcert')
+  ?new PrismaClient({adapter:new PrismaPg({...postgresConnection(url.toString()),max:2},{schema:url.searchParams.get('schema')||'public'})})
+  :new PrismaClient();
 try {
   let input='';for await(const chunk of process.stdin)input+=chunk;
   const {email,name,password,role}=JSON.parse(input);

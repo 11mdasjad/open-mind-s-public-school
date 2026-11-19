@@ -1,4 +1,5 @@
 import {db} from './db';
+import {allowedDraftStudents,invoiceScope} from './student-register';
 import {admins} from '../shared/modules';
 import {portalForRole} from '../shared/portals';
 import {effectiveAccess} from './access';
@@ -25,7 +26,7 @@ export async function approvalList(req:any){
   const records=await db.entry.findMany({where:{module:'approvals',archived:false,...(!reviewer?{userId:req.account.id}:{})},orderBy:{createdAt:'desc'},include:{user:{select:{name:true}}}});
   return records.filter(r=>r.userId===req.account.id||(req.account.permissions[moduleOf((r.data as any).type)]!=='none'&&(req.account.role!=='Accountant'||(r.data as any).type==='paymentVerifications'))).map(r=>({...r,submittedBy:r.user?.name,canReview:reviewer&&r.userId!==req.account.id&&r.status==='Pending'}));
 }
-export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowedStudents,scopedEntries}:any){
+export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowedStudents,scopedEntries,requireStudent}:any){
   async function canSubmit(req:any,type:string,row:any){
     if(!row)fail(404,'Record not found.');
     if(req.account.permissions[moduleOf(type)]!=='manage')fail(403,'You cannot submit this type of record.');
@@ -71,10 +72,12 @@ export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowe
         else if(type==='payroll')await tx.payroll.update({where:{id:row.id},data:{status:'Approved'}});
         else if(type==='paymentVerifications'){
           const payment=row.data as any,invoice=await tx.invoice.findUnique({where:{id:payment.invoiceId},include:{payments:{include:{refunds:true}}}});if(!invoice)fail(404,'Invoice not found.');
-          const paid=invoice!.payments.reduce((n,p)=>n+p.amount-p.refunds.reduce((s,r)=>s+r.amount,0),0);if(payment.amount>invoice!.amount-paid)fail(409,'The payment exceeds the remaining invoice balance.');
+          if(['Draft','Cancelled'].includes(invoice!.issueStatus))fail(409,'This invoice is not open for collection.');
+      const newPending=await tx.feeCollection.findMany({where:{status:'Pending'}});if(newPending.some(c=>((c.details as any).invoiceIds||[]).includes(invoice!.id)))fail(409,'A collection already awaits verification for this invoice.');
+      const paid=invoice!.payments.reduce((n,p)=>n+p.amount-p.refunds.reduce((s,r)=>s+r.amount,0),0);if(payment.amount>invoice!.amount-paid)fail(409,'The payment exceeds the remaining invoice balance.');
           const receipt=await tx.payment.create({data:{invoiceId:invoice!.id,amount:payment.amount,method:payment.method,reference:payment.reference||null,recordedBy:req.account.id,receipt:`RCPT-${randomBytes(7).toString('hex').toUpperCase()}`}});
           await tx.entry.update({where:{id:row.id},data:{status:'Approved',data:{...payment,paymentId:receipt.id,receipt:receipt.receipt}}});
-          const student=await tx.student.findUnique({where:{id:invoice!.studentId}});if(student)await notify(tx,student.userId,'Fee payment verified',`${receipt.receipt} is available in your fee ledger.`,'fees',invoice!.id);
+          const student=invoice!.studentId?await tx.student.findUnique({where:{id:invoice!.studentId}}):null;if(student)await notify(tx,student.userId,'Fee payment verified',`${receipt.receipt} is available in your fee ledger.`,'fees',invoice!.id);
         }else await tx.entry.update({where:{id:row.id},data:{status:'Approved'}});
       }else if(entryTypes.includes(type))await tx.entry.update({where:{id:row.id},data:{status:'Rejected'}});
       if(r!.userId)await notify(tx,r!.userId,`${d.decision}: ${r!.title}`,d.comment,'approvals',r!.id);
@@ -86,9 +89,20 @@ export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowe
   router.get('/payment-verifications',wrap(async(req:any,res:any)=>{permit(req,[...admins,'Accountant']);res.json(await db.entry.findMany({where:{module:'paymentVerifications',archived:false},orderBy:{createdAt:'desc'}}));}));
   router.post('/fees/:id/payment-requests',wrap(async(req:any,res:any)=>{
     permit(req,[...admins,'Accountant']);const d=z.object({amount:z.coerce.number().positive().max(10000000).transform(n=>Math.round(n*100)),method:z.enum(['Cash','UPI','Bank transfer','Cheque']),reference:z.string().trim().max(100).default('')}).parse(req.body);
-    const invoice=await db.invoice.findUnique({where:{id:req.params.id},include:{payments:{include:{refunds:true}},student:{select:{name:true}}}});if(!invoice)fail(404,'Invoice not found.');
-    const paid=invoice!.payments.reduce((n,p)=>n+p.amount-p.refunds.reduce((s,r)=>s+r.amount,0),0);if(d.amount>invoice!.amount-paid)fail(400,'Payment exceeds the outstanding balance.');if(d.method!=='Cash'&&!d.reference)fail(400,'A transaction reference is required.');
-    const record=await db.entry.create({data:{module:'paymentVerifications',title:`${invoice!.number} · ${invoice!.student.name}`,userId:req.account.id,studentId:invoice!.studentId,status:'Draft',data:{...d,invoiceId:invoice!.id}}});await audit(req,'collect-pending','paymentVerification',record.id);res.status(201).json(record);
+    const record=await db.$transaction(async tx=>{
+      const invoice=await tx.invoice.findUnique({where:{id:req.params.id},include:{payments:{include:{refunds:true}},student:{select:{name:true}},draftStudent:{select:{title:true}}}});if(!invoice)fail(404,'Invoice not found.');
+      await requireStudent(req,invoice!.studentId||invoice!.draftStudentId);
+      if(['Draft','Cancelled'].includes(invoice!.issueStatus))fail(409,'This invoice is not open for collection.');
+      const newPending=await tx.feeCollection.findMany({where:{status:'Pending'}});if(newPending.some(c=>((c.details as any).invoiceIds||[]).includes(invoice!.id)))fail(409,'A collection already awaits verification for this invoice.');
+      const paid=invoice!.payments.reduce((n,p)=>n+p.amount-p.refunds.reduce((s,r)=>s+r.amount,0),0);
+      if(d.amount<1||d.amount>invoice!.amount-paid)fail(400,'Payment exceeds the outstanding balance or is below one paisa.');
+      if(d.method!=='Cash'&&!d.reference)fail(400,'A transaction reference is required.');
+      if(d.reference&&await tx.feeCollection.findFirst({where:{reference:{equals:d.reference,mode:'insensitive'}}}))fail(409,'This transaction reference was already recorded.');
+      const pending=await tx.entry.findMany({where:{module:'paymentVerifications',archived:false,status:{in:['Draft','Pending']},data:{path:['invoiceId'],equals:invoice!.id}}});
+      if(d.amount>invoice!.amount-paid-pending.reduce((sum,row)=>sum+Number((row.data as any).amount||0),0))fail(409,'A collection already awaits verification for this balance.');
+      return tx.entry.create({data:{module:'paymentVerifications',title:`${invoice!.number} · ${invoice!.student?.name||invoice!.draftStudent?.title||'Student'}`,userId:req.account.id,studentId:invoice!.studentId,status:'Draft',data:{...d,invoiceId:invoice!.id,profileId:invoice!.studentId||invoice!.draftStudentId}}});
+    },{isolationLevel:'Serializable'});
+    await audit(req,'collect-pending','paymentVerification',record.id);res.status(201).json(record);
   }));
   router.post('/recruitment/:id/onboard',wrap(async(req:any,res:any)=>{
     permit(req,[...admins,'HR Manager']);const d=z.object({joiningDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),qualification:z.string().min(1),salary:z.coerce.number().nonnegative().max(10000000)}).parse(req.body);
@@ -99,12 +113,12 @@ export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowe
     },{isolationLevel:'Serializable'});await audit(req,'onboard','employee',result.id);res.status(201).json({record:result,activationTokens:[{email:result.email,token}]});
   }));
   router.get('/analytics',wrap(async(req:any,res:any)=>{
-    const students=await allowedStudents(req),ids=students.map((s:any)=>s.id);const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
-    const attendance=req.account.permissions.attendance!=='none'?await db.attendance.findMany({where:{studentId:{in:ids},date}}):[];const financial=req.account.permissions.fees!=='none'&&[...admins,'Accountant'].includes(req.account.role);const staff=req.account.permissions.employees!=='none'&&[...admins,'HR Manager'].includes(req.account.role);
-    const invoices=financial?await db.invoice.findMany({where:{studentId:{in:ids}},include:{payments:{include:{refunds:true}}}}):[];
+    const registered=await allowedStudents(req),drafts=await allowedDraftStudents(req),students=[...registered,...drafts],ids=students.map((s:any)=>s.id);const date=new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
+    const attendance=req.account.permissions.attendance!=='none'?await db.attendance.findMany({where:{personKey:{in:ids},date,period:'Daily'}}):[];const financial=req.account.permissions.fees!=='none'&&[...admins,'Accountant'].includes(req.account.role);const staff=req.account.permissions.employees!=='none'&&[...admins,'HR Manager'].includes(req.account.role);
+    const invoices=financial?await db.invoice.findMany({where:invoiceScope(registered,drafts),include:{payments:{include:{refunds:true}}}}):[];
     const billed=invoices.reduce((n,i)=>n+i.amount,0),collected=invoices.reduce((n,i)=>n+i.payments.reduce((a,p)=>a+p.amount-p.refunds.reduce((s,r)=>s+r.amount,0),0),0);
     const employees=staff?await db.employee.findMany({where:{archived:false}}):[];const staffAttendance=staff?await db.attendance.findMany({where:{employeeId:{in:employees.map(e=>e.id)},date}}):[];
-    const classes=[...new Set(students.map((s:any)=>`${s.className} / ${s.section}`))].map(name=>{const members=students.filter((s:any)=>`${s.className} / ${s.section}`===name),memberIds=members.map((s:any)=>s.id),marks=attendance.filter(a=>memberIds.includes(a.studentId));return {name,students:members.length,marked:marks.length,present:marks.filter(a=>['Present','Late'].includes(a.status)).length};});
+    const classes=[...new Set(students.map((s:any)=>`${s.className} / ${s.section}`))].map(name=>{const members=students.filter((s:any)=>`${s.className} / ${s.section}`===name),memberIds=members.map((s:any)=>s.id),marks=attendance.filter(a=>memberIds.includes(a.personKey));return {name,students:members.length,marked:marks.length,present:marks.filter(a=>['Present','Late'].includes(a.status)).length};});
     const departments=[...new Set(employees.map(e=>e.department))].map(name=>{const members=employees.filter(e=>e.department===name),memberIds=members.map(e=>e.id);return{name,employees:members.length,present:staffAttendance.filter(a=>memberIds.includes(a.employeeId||'')&&['Present','Late'].includes(a.status)).length}});
     const exams=req.account.permissions.exams!=='none'?await db.exam.findMany({where:{OR:students.map((s:any)=>({className:s.className,session:s.session}))},include:{marks:{where:{studentId:{in:ids}}}}}):[];
     res.json({date,studentCount:students.length,employeeCount:staff?employees.length:null,billed:financial?billed:null,collected:financial?collected:null,pending:financial?billed-collected:null,classes,departments,exams:exams.map(e=>({id:e.id,name:e.name,subject:e.subject,published:e.published,entries:e.marks.length,average:e.marks.length?Math.round(e.marks.reduce((n,m)=>n+m.score,0)/e.marks.length/e.maxMarks*100):null}))});
@@ -112,7 +126,7 @@ export function registerWorkflowRoutes(router:any,{wrap,fail,permit,audit,allowe
   router.get('/workspace-summary',wrap(async(req:any,res:any)=>{
     const students=await allowedStudents(req),employee=await db.employee.findUnique({where:{userId:req.account.id}});const requests=req.account.permissions.approvals==='none'?[]:await approvalList(req);
     const count=async(module:string)=>req.account.permissions[module]!=='none'?(await scopedEntries(req,module)).length:null;
-    const counts:Record<string,any>={students:students.length};for(const m of ['progress','studentAssessments','employeeAssessments','appraisals','recruitment','workReports','schoolReports'])counts[m]=await count(m);
+    const counts:Record<string,any>={students:students.length+(await allowedDraftStudents(req)).length};for(const m of ['progress','studentAssessments','employeeAssessments','appraisals','recruitment','workReports','schoolReports'])counts[m]=await count(m);
     counts.pendingApprovals=requests.filter(r=>r.status==='Pending').length;counts.employees=req.account.permissions.employees!=='none'&&[...admins,'HR Manager'].includes(req.account.role)?await db.employee.count({where:{archived:false}}):null;
     counts.paymentVerifications=req.account.permissions.paymentVerifications!=='none'?await db.entry.count({where:{module:'paymentVerifications',status:{in:['Draft','Pending']}}}):null;
     const unread=await db.entry.count({where:{module:'notifications',userId:req.account.id,status:'Unread'}});

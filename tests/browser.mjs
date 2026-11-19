@@ -155,6 +155,8 @@ try {
   await page.getByLabel("Gender", { exact: true }).selectOption("Female");
   await page.getByLabel("Class", { exact: true }).fill("5");
   await page.getByLabel("Parent / guardian name").fill("Browser Parent");
+  await page.getByLabel("Father’s name").fill("Browser Father");
+  await page.getByLabel("Roll number").fill("05");
   await page.getByLabel("Parent email").fill("browser-parent@test.example");
   await page.getByLabel("Parent phone").fill("9999999999");
   await page.getByLabel("Address", { exact: true }).fill("Test address");
@@ -165,11 +167,26 @@ try {
     .getByRole("heading", { name: "Accounts are ready to activate." })
     .waitFor();
   await page.getByRole("button", { name: "Close dialog" }).click();
-  await page.getByText("Browser Student", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Class 5, 1 student" }).click();
+  await page.locator("tbody tr").first().waitFor();
+  const rosterText = await page.locator("tbody").textContent();
+  assert.ok(rosterText.includes("Browser Student"));
+  assert.ok(rosterText.includes("Browser Father"));
+  assert.ok(rosterText.includes("05"));
+  assert.match(rosterText, /OM-\d{4}-[A-F0-9]{8}/);
   await page.screenshot({
     path: "test-results/students-desktop.png",
     fullPage: true,
   });
+  await page.getByRole("button", { name: "Full profile" }).click();
+  const studentProfile = page.getByRole('region',{name:'Student profile',exact:true});
+  await studentProfile.getByText("Student information", { exact: true }).waitFor();
+  await studentProfile.getByText("Parent and contact information", { exact: true }).waitFor();
+  const profileText = await studentProfile.textContent();
+  assert.ok(profileText.includes("Browser Father"));
+  assert.ok(profileText.includes("Browser Parent"));
+  assert.ok(profileText.includes("Test address"));
+  await studentProfile.getByRole("button", { name: "Back to students" }).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Excel", exact: true }).click();
   const download = await downloadPromise;
@@ -191,17 +208,30 @@ try {
     parentEmail: "imported-parent@test.example",
     phone: "9999999999",
     address: "Import test address",
+    "details.fatherName": "Imported Father",
+    "details.rollNumber": "06",
   };
+  const incompleteImportRow = Object.fromEntries(
+    Object.keys(importRow).map((key) => [key, ""]),
+  );
+  Object.assign(incompleteImportRow, {
+    name: "Incomplete Nursery Student",
+    className: "Nursery",
+    parentName: "Nursery Guardian",
+    "details.fatherName": "Nursery Father",
+    "details.rollNumber": "01",
+  });
   importSheet.addRow(Object.keys(importRow));
   importSheet.addRow(Object.values(importRow));
+  importSheet.addRow(Object.values(incompleteImportRow));
   await importBook.xlsx.writeFile("test-results/import-students.xlsx");
   await page.getByRole("button", { name: "Import", exact: true }).click();
   await page
     .locator('input[type="file"]')
     .setInputFiles("test-results/import-students.xlsx");
-  await page.getByText("1 rows ready to validate and import.").waitFor();
+  await page.getByText("2 rows ready to validate and import.").waitFor();
   await page
-    .getByRole("button", { name: "Import 1 records", exact: true })
+    .getByRole("button", { name: "Import 2 records", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Finish & view activation links" })
@@ -210,7 +240,33 @@ try {
     .getByRole("heading", { name: "Accounts are ready to activate." })
     .waitFor();
   await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByRole("button", { name: "All classes" }).click();
+  await page.getByRole("button", { name: "Nursery, 1 student" }).click();
+  const incompleteRow = page.getByRole("row").filter({ hasText: "Incomplete Nursery Student" });
+  await incompleteRow.waitFor();
+  await incompleteRow.getByRole("button", { name: "Edit details" }).click();
+  const incompleteForm = page.getByRole("dialog");
+  await incompleteForm.getByLabel("Student email").fill("nursery-student@test.example");
+  await incompleteForm.getByLabel("Date of birth").fill("2021-03-01");
+  await incompleteForm.getByLabel("Gender", { exact: true }).selectOption("Female");
+  await incompleteForm.getByLabel("Section").fill("A");
+  await incompleteForm.getByLabel("Academic session").fill("2026–2027");
+  await incompleteForm.getByLabel("Parent email").fill("nursery-parent@test.example");
+  await incompleteForm.getByLabel("Parent phone").fill("9999999998");
+  await incompleteForm.getByLabel("Address", { exact: true }).fill("Nursery test address");
+  await incompleteForm.getByRole("button", { name: "Save record" }).click();
+  await page.getByText("Record saved successfully.").waitFor();
+  await incompleteRow.getByRole("button", { name: "Edit details" }).click();
+  assert.equal(await page.getByRole("dialog").getByLabel("Address", { exact: true }).inputValue(), "Nursery test address");
+  await page.getByRole("dialog").getByRole("button", { name: "Close dialog" }).click();
+  await incompleteRow.getByRole("button", { name: "Register student" }).click();
+  await page.getByRole("heading", { name: "Accounts are ready to activate." }).waitFor();
+  await page.getByRole("button", { name: "Close dialog" }).click();
+  await page.getByText("Nursery Father", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "All classes" }).click();
+  await page.getByRole("button", { name: "Class 6, 1 student" }).click();
   await page.getByText("Imported Student", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "All classes" }).click();
 
   for (const name of [
     "Admissions",
@@ -243,6 +299,7 @@ try {
     );
   }
   await page.getByRole('navigation',{name:'Portal navigation'}).getByRole('button',{name:'Attendance',exact:true}).click();
+  await page.getByRole('button',{name:'Staff / my attendance',exact:true}).click();
   await page.getByRole('button',{name:'My attendance',exact:true}).click();
   await page.getByRole('columnheader',{name:'Hours',exact:true}).waitFor();
   await page.getByRole("button", { name: "Super Admin dashboard", exact: true }).click();
@@ -314,6 +371,7 @@ try {
       await form.getByLabel('Full name',{exact:true}).fill(name);await form.getByLabel('Student email',{exact:true}).fill(kind+'-added@student.test');await form.getByLabel('Date of birth',{exact:true}).fill('2015-03-01');await form.getByLabel('Gender',{exact:true}).selectOption('Female');await form.getByLabel('Class',{exact:true}).fill('New-'+kind);await form.getByLabel('Parent / guardian name',{exact:true}).fill('Test Guardian');await form.getByLabel('Parent email',{exact:true}).fill(kind+'-guardian@student.test');await form.getByLabel('Parent phone',{exact:true}).fill('9999999999');await form.getByLabel('Address',{exact:true}).fill('Test address');
       const response=member.waitForResponse(r=>r.url().endsWith('/api/students')&&r.request().method()==='POST');await form.getByRole('button',{name:'Save record',exact:true}).click();assert.equal((await response).status(),201);
       await member.getByRole('heading',{name:'Accounts are ready to activate.',exact:true}).waitFor();await member.getByRole('button',{name:'Close dialog',exact:true}).click();
+      await member.getByRole('button',{name:'New-'+kind+', 1 student',exact:true}).click();
       const row=member.getByRole('row').filter({hasText:name});await row.waitFor();await member.screenshot({path:'test-results/'+kind+'-student-access.png',fullPage:true});
       if(kind==='teacher'){
       const n=await adminApi('/records/notices',{title:'Teacher notification connection',body:'Your linked school notice is ready.',audience:'Employees',publishDate:new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'})});

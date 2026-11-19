@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import {unlinkSync} from 'node:fs';
 import assert from "node:assert/strict";
 import { app } from "../server/app";
+import {suppliedTuition,suppliedTransport} from "../shared/fee-schedule";
 import { db } from "../server/db";
 import {flushActivity} from "../server/activity";
 import type { Server } from "node:http";
@@ -40,6 +41,13 @@ async function login(email: string, password: string, client: Client) {
   client.csrf = r.data.csrf;
   return r.data.user;
 }
+async function uploadProfileFile(studentId: string, kind = 'Document', client: Client = admin, content = '%PDF-1.4\nStudent attachment', mime = 'application/pdf') {
+  const form = new FormData();
+  form.append('kind', kind);
+  form.append('file', new Blob([content], {type: mime}), 'student-file.pdf');
+  const response = await fetch(`${origin}/api/students/${studentId}/profile/files`, {method: 'POST', headers: {'x-school-request': '1', Cookie: client.cookie || '', 'x-csrf-token': client.csrf || ''}, body: form});
+  return {status: response.status, data: await response.json()};
+}
 async function approve(type:string,entityId:string,client:Client=admin){
  const submitted=await request('/workflow/submit','POST',{type,entityId},client);
  assert.equal(submitted.status,201,JSON.stringify(submitted.data));
@@ -66,6 +74,26 @@ after(async () => {
   await new Promise<void>((r) => server.close(() => r()));
   await flushActivity();
   await db.$disconnect();
+});
+test("allows the localhost Vite origin only in development", async () => {
+  const headers = {
+    "Content-Type": "application/json",
+    "x-school-request": "1",
+    Origin: "http://localhost:5173",
+  };
+  const local = await fetch(`${origin}/api/auth/login`, {
+    method: "POST",
+    headers,
+    body: "{}",
+  });
+  assert.notEqual(local.status, 403);
+
+  const external = await fetch(`${origin}/api/auth/login`, {
+    method: "POST",
+    headers: { ...headers, Origin: "https://example.com" },
+    body: "{}",
+  });
+  assert.equal(external.status, 403);
 });
 test("school workflows, validation and account isolation", async (t) => {
   let student: any,
@@ -147,6 +175,128 @@ test("school workflows, validation and account isolation", async (t) => {
       );
     },
   );
+  await t.test("incomplete student records can be edited and registered when complete", async () => {
+    const userCount = await db.user.count();
+    const imported = await request("/student-drafts/import", "POST", {
+      records: [
+        {
+          name: "Incomplete Nursery Student",
+          className: "Nursery",
+          section: "",
+          session: "",
+          email: "",
+          parentEmail: "",
+          details: { fatherName: "Nursery Father", rollNumber: "01" },
+        },
+      ],
+    });
+    assert.equal(imported.status, 201, JSON.stringify(imported.data));
+    assert.equal(imported.data.imported, 1);
+    assert.equal(
+      (
+        await request("/student-drafts/import", "POST", {
+          records: [
+            {
+              name: "Duplicate Nursery Student",
+              className: "Nursery",
+              details: { rollNumber: "01" },
+            },
+          ],
+        })
+      ).status,
+      409,
+    );
+    assert.equal(await db.user.count(), userCount);
+    const drafts = await request("/student-drafts");
+    assert.equal(drafts.status, 200);
+    const draft = drafts.data.find(
+      (row: { title: string }) => row.title === "Incomplete Nursery Student",
+    );
+    assert.ok(draft);
+    const draftProfile = await request(`/students/${draft.id}/profile`);
+    assert.equal(draftProfile.status, 200);
+    assert.equal(draftProfile.data.student.isDraft, true);
+    const draftFile = await uploadProfileFile(draft.id);
+    assert.equal(draftFile.status, 201, JSON.stringify(draftFile.data));
+    assert.ok((await request('/students/register')).data.some((row:any)=>row.id===draft.id));
+    assert.equal((await request('/attendance','POST',{date:'2026-01-02',records:[{studentId:draft.id,status:'Present'}]})).status,200);
+    assert.equal((await request('/attendance','POST',{date:'2026-01-03',records:[{studentId:draft.id,status:'Absent'}]})).status,200);
+    // Re-saving the same date must update a durable record, not duplicate it.
+    assert.equal((await request('/attendance','POST',{date:'2026-01-03',records:[{studentId:draft.id,status:'Absent'}]})).status,200);
+    const persistedMarks=await db.attendance.findMany({where:{personKey:draft.id,period:'Daily',date:{in:['2026-01-02','2026-01-03']}},orderBy:{date:'asc'}});
+    assert.deepEqual(persistedMarks.map(mark=>mark.status),['Present','Absent']);
+    const register=await request('/attendance/register?className=Nursery&month=2026-01');
+    assert.equal(register.status,200);
+    assert.equal(register.data.records.filter((row:any)=>row.personKey===draft.id).length,2);
+    assert.equal((await request(`/students/${draft.id}/profile?month=2026-01`)).data.attendance.length,2);
+    const feeInput={studentId:draft.id,title:'January tuition',amount:500,dueDate:'2026-01-10',session:'2026–2027'};
+    const draftInvoice=await request('/fees','POST',feeInput);
+    assert.equal(draftInvoice.status,201,JSON.stringify(draftInvoice.data));
+    assert.equal(draftInvoice.data.draftStudentId,draft.id);
+    assert.equal((await request('/fees','POST',feeInput)).status,409,'Do not bill the same fee twice for one month');
+    const draftCollection=await request(`/fees/${draftInvoice.data.id}/payment-requests`,'POST',{amount:500,method:'Cash'});
+    assert.equal(draftCollection.status,201);
+    assert.equal((await request(`/fees/${draftInvoice.data.id}/payment-requests`,'POST',{amount:1,method:'Cash'})).status,409,'Do not collect the same outstanding balance twice while verification is pending');
+    assert.ok((await request('/fees')).data.some((row:any)=>row.id===draftInvoice.data.id),'Imported student invoices are included in the fee register');
+    assert.ok((await request('/dashboard')).data.total>=50000,'Dashboard includes imported student fees');
+    const structure=await request('/records/feeStructures','POST',{title:'Nursery monthly fee',className:'Nursery',session:'2026–2027',amount:500,frequency:'Monthly'});
+    assert.equal(structure.status,201);
+    const assigned=await request(`/records/feeStructures/${structure.data.id}/assign`,'POST',{dueDate:'2026-02-10',period:'February 2026'});
+    assert.equal(assigned.status,200,JSON.stringify(assigned.data));
+    assert.equal(assigned.data.count,1,'Class fee assignment includes imported students');
+    const draftApproval=await request('/workflow/submit','POST',{type:'paymentVerifications',entityId:draftCollection.data.id});
+    assert.equal(draftApproval.status,201);
+    assert.equal(draft.data.email, "");
+    assert.equal(draft.data.parentEmail, "");
+    assert.equal(
+      (await request("/student-drafts", "GET", undefined, teacherClient)).status,
+      401,
+    );
+    assert.equal(
+      (await request(`/student-drafts/${draft.id}/complete`, "POST", {})).status,
+      400,
+    );
+    assert.equal(
+      (await request(`/student-drafts/${draft.id}`, "PUT", {
+        name: "Complete Nursery Student",
+        email: "complete-nursery@test.example",
+        dob: "2021-03-01",
+        gender: "Female",
+        className: "Nursery",
+        section: "A",
+        session: "2026–2027",
+        parentName: "Nursery Guardian",
+        parentEmail: "nursery-guardian@test.example",
+        phone: "9999999999",
+        address: "Nursery address",
+        details: { fatherName: "Nursery Father", rollNumber: "01" },
+      })).status,
+      200,
+    );
+    const completed = await request(`/student-drafts/${draft.id}/complete`, "POST", {});
+    assert.equal(completed.status, 201, JSON.stringify(completed.data));
+    assert.equal(completed.data.activationTokens.length, 1);
+    const registeredProfile = await request(`/students/${completed.data.record.id}/profile`);
+    assert.equal(registeredProfile.data.documents[0].id, draftFile.data.id, 'Attachments follow a draft through registration');
+    assert.ok(registeredProfile.data.invoices.some((row:any)=>row.id===draftInvoice.data.id),'Invoices follow registration');
+    const convertedInvoice=await db.invoice.findUniqueOrThrow({where:{id:draftInvoice.data.id}});
+    assert.equal(convertedInvoice.studentId,completed.data.record.id);
+    assert.equal(convertedInvoice.draftStudentId,null);
+    const convertedAttendance=await request(`/students/${completed.data.record.id}/profile?month=2026-01`);
+    assert.equal(convertedAttendance.data.attendance.length,2);
+    assert.equal((await request(`/workflow/${draftApproval.data.id}/decide`,'POST',{decision:'Approved',comment:'Verified'},principalClient)).status,200,'Pending collections remain verifiable after registration');
+    const draftPayment=await db.payment.findFirstOrThrow({where:{invoiceId:draftInvoice.data.id}});
+    assert.equal((await request(`/reports/receipt/${draftPayment.id}`)).status,200);
+    assert.equal(await db.user.count(), userCount + 2);
+    assert.equal((await db.student.findUnique({ where: { id: completed.data.record.id } }))?.className, "Nursery");
+    assert.equal((await request("/student-drafts")).data.some(
+      (row: { id: string }) => row.id === draft.id,
+    ), false);
+    assert.equal(
+      (await request(`/students/${completed.data.record.id}`, "DELETE")).status,
+      200,
+    );
+  });
   await t.test("admission enquiry and private tracking", async () => {
     const d = {
       childName: "Applicant",
@@ -206,6 +356,7 @@ test("school workflows, validation and account isolation", async (t) => {
         parentEmail: "parent@test.example",
         phone: "9999999999",
         address: "Test address",
+        details: { fatherName: "Test Father", rollNumber: "12", bloodGroup: "O+" },
       };
       let r = await request("/students", "POST", d);
       assert.equal(r.status, 201, JSON.stringify(r.data));
@@ -323,10 +474,14 @@ test("school workflows, validation and account isolation", async (t) => {
         201,
       );
       assert.equal(
-        (await request("/students", "GET", undefined, teacherClient)).data
-          .length,
+        (await request("/students", "GET", undefined, teacherClient)).data.length,
         1,
       );
+      const assignedStudent = (await request("/students", "GET", undefined, teacherClient)).data[0];
+      assert.equal(assignedStudent.id, student.id);
+      assert.equal(assignedStudent.details.fatherName, "Test Father");
+      assert.equal(assignedStudent.details.rollNumber, "12");
+      assert.equal(assignedStudent.details.bloodGroup, "O+");
       const period = {
         title: "Math",
         className: "5",
@@ -486,6 +641,10 @@ test("school workflows, validation and account isolation", async (t) => {
         method: "Cash",
       });
       assert.equal(p.status, 201);
+      const pendingProfile = await request(`/students/${student.id}/profile`);
+      assert.equal(pendingProfile.data.pending.find((row: any) => row.id === p.data.id).canSubmit, true);
+      const reviewerProfile = await request(`/students/${student.id}/profile`, 'GET', undefined, principalClient);
+      assert.equal(reviewerProfile.data.pending.find((row: any) => row.id === p.data.id).canSubmit, false, 'Only the collector can submit a saved payment draft');
       await approve('paymentVerifications',p.data.id);
       p.data.id=(await request('/payment-verifications')).data.find((r:any)=>r.id===p.data.id).data.paymentId;
       assert.equal(
@@ -520,6 +679,40 @@ test("school workflows, validation and account isolation", async (t) => {
       );
     },
   );
+  await t.test('student profiles scope fees, attendance, photos and documents to the student', async () => {
+    const attendanceRow = await db.attendance.findFirstOrThrow({where: {studentId: student.id}});
+    const profile = await request(`/students/${student.id}/profile?month=${attendanceRow.date.slice(0,7)}`);
+    assert.equal(profile.status, 200, JSON.stringify(profile.data));
+    assert.equal(profile.data.student.id, student.id);
+    assert.ok(profile.data.invoices.some((row: any) => row.id === invoice.id));
+    assert.ok(profile.data.attendance.some((row: any) => row.id === attendanceRow.id));
+    assert.ok(profile.data.attendance.every((row: any) => row.studentId === student.id));
+    assert.equal((await request(`/students/${student.id}/profile?month=2026-99`)).status, 400);
+    assert.equal((await request(`/students/${secondStudent.id}/profile`, 'GET', undefined, studentClient)).status, 403);
+    const teacher = await request(`/students/${student.id}/profile`, 'GET', undefined, teacherClient);
+    assert.equal(teacher.status, 200);
+    assert.equal(teacher.data.access.fees, false);
+    assert.deepEqual(teacher.data.invoices, []);
+    const file = await uploadProfileFile(student.id);
+    assert.equal(file.status, 201, JSON.stringify(file.data));
+    const files = await request(`/students/${student.id}/profile`);
+    assert.ok(files.data.documents.some((row: any) => row.id === file.data.id));
+    assert.equal((await request(`/students/${student.id}/profile/files/${file.data.id}`, 'GET', undefined, studentClient)).status, 200);
+    assert.equal((await request(`/students/${secondStudent.id}/profile/files/${file.data.id}`)).status, 404, 'A file cannot be accessed under the wrong student');
+    assert.equal((await uploadProfileFile(student.id, 'Document', studentClient)).status, 403);
+    assert.equal((await uploadProfileFile(student.id, 'Photo')).status, 400, 'PDF cannot be used as a photo');
+    assert.equal((await uploadProfileFile(student.id, 'Document', admin, 'not a pdf')).status, 400);
+    const form = new FormData();
+    form.append('kind', 'Photo');
+    form.append('file', new Blob([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', 'base64')], {type: 'image/png'}), 'photo.png');
+    const response = await fetch(`${origin}/api/students/${student.id}/profile/files`, {method:'POST', headers: {'x-school-request':'1', Cookie:admin.cookie!, 'x-csrf-token':admin.csrf!}, body: form});
+    assert.equal(response.status, 201);
+    const photo = await response.json();
+    const photoProfile = await request(`/students/${student.id}/profile`);
+    assert.equal(photoProfile.data.photo.id, photo.id);
+    assert.ok(!photoProfile.data.documents.some((row: any) => row.id === photo.id));
+    assert.equal((await request(`/students/${student.id}/profile/files/${photo.id}`,'GET',undefined,studentClient)).status, 200);
+  });
   await t.test(
     "gateway capture verification, invalid signatures, webhook replay and amounts",
     async () => {
@@ -1424,6 +1617,35 @@ test("school workflows, validation and account isolation", async (t) => {
     await request('/notifications/read-all','POST',{before:latest.asOf},teacherClient);assert.equal((await request('/notifications/summary','GET',undefined,teacherClient)).data.unread,0);
     assert.equal((await request('/notifications/feed?page=0','GET',undefined,teacherClient)).status,400);
     const privateOwner=await db.user.findUniqueOrThrow({where:{email:'student@test.example'}});assert.equal((await request('/notifications/summary','GET',undefined,studentClient)).data.unread,await db.entry.count({where:{module:'notifications',userId:privateOwner.id,status:'Unread',archived:false}}));
+  });
+  await t.test('school fee rates, server-calculated charges and historical invoice amounts',async()=>{
+    const session='Fee schedule QA';
+    const templates=[];
+    for(const rate of suppliedTuition){
+      const response=await request('/records/feeStructures','POST',{title:'Tuition fee',...rate,session,frequency:'Monthly'});
+      assert.equal(response.status,201);templates.push(response.data);
+    }
+    assert.equal((await request('/fees/schedule/transport','PUT',{session,routes:suppliedTransport})).status,200);
+    const schedule=await request('/fees/schedule?'+new URLSearchParams({session}));
+    assert.equal(schedule.status,200);assert.equal(schedule.data.tuition.length,11);
+    assert.deepEqual(schedule.data.transport,suppliedTransport);
+    assert.equal(schedule.data.tuition.find((rate:any)=>rate.className==='Class 8').amount,400);
+    assert.equal((await request('/fees/schedule','GET',undefined,teacherClient)).status,403);
+    const student=await db.entry.create({data:{module:'studentDrafts',title:'Fee schedule test student',data:{name:'Fee schedule test student',className:'Nursery',session,details:{rollNumber:'999'}}}});
+    const base={studentId:student.id,title:'Client supplied title',amount:1,dueDate:'2026-09-10',session};
+    const tuition=await request('/fees','POST',{...base,scheduleKind:'tuition'});
+    assert.equal(tuition.status,201);assert.equal(tuition.data.amount,35000);assert.equal(tuition.data.title,'Tuition fee');
+    assert.equal((await request('/fees','POST',{...base,scheduleKind:'tuition'})).status,409);
+    const transport=await request('/fees','POST',{...base,scheduleKind:'transport',transportRoute:'Jalalpur'});
+    assert.equal(transport.status,201);assert.equal(transport.data.amount,30000);
+    assert.equal((await request('/fees','POST',{...base,scheduleKind:'transport',transportRoute:'Lakri'})).status,409);
+    assert.equal((await request('/fees','POST',{...base,dueDate:'2026-10-10',scheduleKind:'transport',transportRoute:'Unknown route'})).status,400);
+    await request(`/records/feeStructures/${templates[0].id}/assign`,'POST',{dueDate:'2026-09-10',period:'September 2026'});
+    assert.equal(await db.invoice.count({where:{draftStudentId:student.id,title:{startsWith:'Tuition fee'},dueDate:{startsWith:'2026-09'}}}),1);
+    assert.equal((await request('/fees/schedule/transport','PUT',{session,routes:suppliedTransport.map(rate=>({...rate,amount:rate.amount+50}))})).status,200);
+    assert.equal((await db.invoice.findUnique({where:{id:transport.data.id}}))!.amount,30000,'Rate updates do not change an existing bill');
+    const next=await request('/fees','POST',{...base,dueDate:'2026-10-10',scheduleKind:'transport',transportRoute:'Jalalpur'});
+    assert.equal(next.data.amount,35000);
   });
   await t.test("password changes, archive and revocation", async () => {
     assert.equal(

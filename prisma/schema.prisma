@@ -21,6 +21,8 @@ model User {
   children Student[] @relation("ParentUser")
   employees Employee[]
   entries Entry[]
+  feeVersions FeeVersion[]
+  feeCollections FeeCollection[]
   documents Document[]
 }
 model Session {
@@ -55,6 +57,8 @@ model Student {
   updatedAt DateTime @updatedAt
   attendance Attendance[]
   invoices Invoice[]
+  billingAssignments BillingAssignment[]
+  feeCollections FeeCollection[]
   marks Mark[]
   entries Entry[]
   @@index([className,section,session])
@@ -100,16 +104,28 @@ model Attendance {
 model Invoice {
   id String @id @default(cuid())
   number String @unique
-  studentId String
-  student Student @relation(fields:[studentId],references:[id])
+  studentId String?
+  student Student? @relation(fields:[studentId],references:[id])
+  draftStudentId String?
+  draftStudent Entry? @relation("DraftInvoices",fields:[draftStudentId],references:[id])
   title String
   amount Int
   dueDate String
   session String
   createdAt DateTime @default(now())
+  originalAmount Int?
+  billingPeriod String?
+  issueStatus String @default("Issued")
+  generationKey String? @unique
+  snapshot Json?
+  items Json?
+  createdBy String?
+  adjustments FeeAdjustment[]
+  installments FeeInstallment[]
   payments Payment[]
   orders GatewayOrder[]
   @@index([studentId])
+  @@index([draftStudentId])
 }
 model Payment {
   id String @id @default(cuid())
@@ -121,6 +137,9 @@ model Payment {
   reference String? @unique
   recordedBy String
   createdAt DateTime @default(now())
+  collectionId String?
+  collection FeeCollection? @relation(fields:[collectionId],references:[id])
+  idempotencyKey String? @unique
   refunds Refund[]
 }
 model Refund {
@@ -185,6 +204,9 @@ model Entry {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   archived Boolean @default(false)
+  draftInvoices Invoice[] @relation("DraftInvoices")
+  billingAssignments BillingAssignment[]
+  feeCollections FeeCollection[]
   @@index([module,archived])
   @@index([userId,studentId])
 }
@@ -252,4 +274,93 @@ model DeliveryLog {
   actorId String
   createdAt DateTime @default(now())
   @@index([createdAt])
+}
+
+// Fee configurations are append-only versions; the latest effective version wins.
+model FeeVersion {
+  id String @id @default(cuid())
+  key String
+  kind String
+  session String
+  version Int
+  effectiveDate String
+  active Boolean @default(true)
+  data Json
+  actorId String
+  actor User @relation(fields:[actorId],references:[id])
+  createdAt DateTime @default(now())
+  @@unique([key,session,version])
+  @@index([kind,session,effectiveDate])
+}
+model BillingAssignment {
+  id String @id @default(cuid())
+  studentId String?
+  student Student? @relation(fields:[studentId],references:[id])
+  draftStudentId String?
+  draftStudent Entry? @relation(fields:[draftStudentId],references:[id])
+  profileKey String
+  session String
+  effectiveDate String
+  data Json
+  actorId String
+  createdAt DateTime @default(now())
+  @@index([profileKey,session,effectiveDate])
+}
+model FeeCollection {
+  id String @id @default(cuid())
+  receipt String @unique
+  idempotencyKey String @unique
+  reference String? @unique
+  studentId String?
+  student Student? @relation(fields:[studentId],references:[id])
+  draftStudentId String?
+  draftStudent Entry? @relation(fields:[draftStudentId],references:[id])
+  session String
+  amount Int
+  method String
+  status String @default("Pending")
+  details Json
+  actorId String
+  actor User @relation(fields:[actorId],references:[id])
+  verifiedBy String?
+  verifiedAt DateTime?
+  createdAt DateTime @default(now())
+  allocations Payment[]
+  @@index([studentId,session,status])
+  @@index([draftStudentId,session,status])
+}
+model FeeAdjustment {
+  id String @id @default(cuid())
+  invoiceId String
+  invoice Invoice @relation(fields:[invoiceId],references:[id])
+  kind String
+  amount Int
+  reason String
+  actorId String
+  sourceKey String? @unique
+  createdAt DateTime @default(now())
+  @@index([invoiceId,createdAt])
+}
+model FeeInstallment {
+  id String @id @default(cuid())
+  invoiceId String
+  invoice Invoice @relation(fields:[invoiceId],references:[id])
+  number Int
+  amount Int
+  dueDate String
+  actorId String
+  createdAt DateTime @default(now())
+  @@unique([invoiceId,number])
+}
+model FeeGenerationBatch {
+  id String @id @default(cuid())
+  requestKey String @unique
+  session String
+  period String
+  status String
+  filters Json
+  results Json
+  actorId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

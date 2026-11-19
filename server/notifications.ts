@@ -26,10 +26,17 @@ export async function emitSchoolNotification(req:any,action:string,entity:string
     await deliver([id],eventId,'Your account was updated','Your school administrator updated your account access or sign-in details.','settings');return;
   }
   if(entity==='invoice'){
-    const invoice=await db.invoice.findUnique({where:{id},include:{student:true}});if(invoice)await deliver([invoice.student.userId],eventId,action==='create'?'New fee invoice':'Fee invoice updated',`${invoice.title} · Check your fee ledger for the details.`,'fees',id);return;
+    const invoice=await db.invoice.findUnique({where:{id},include:{student:true}});if(invoice?.student)await deliver([invoice.student.userId],eventId,action==='create'?'New fee invoice':'Fee invoice updated',`${invoice.title} · Check your fee ledger for the details.`,'fees',id);return;
   }
   if(entity==='attendance'&&action==='mark'){
-    for(const row of req.body.records||[]){const person=row.studentId?await db.student.findUnique({where:{id:row.studentId}}):await db.employee.findUnique({where:{id:row.employeeId}});if(person)await deliver([person.userId],eventId+':'+person.id,'Attendance updated',`${req.body.date} · ${req.body.period||'Daily'} · ${row.status}`,'attendance');}return;
+    const records=req.body.records||[];
+    const studentIds=records.map((row:any)=>row.studentId).filter(Boolean), employeeIds=records.map((row:any)=>row.employeeId).filter(Boolean);
+    const [students,employees]=await Promise.all([
+      studentIds.length?db.student.findMany({where:{id:{in:studentIds}},select:{id:true,userId:true}}):[],
+      employeeIds.length?db.employee.findMany({where:{id:{in:employeeIds}},select:{id:true,userId:true}}):[],
+    ]);
+    const people=new Map([...students,...employees].map(person=>[person.id,person]));
+    for(const row of records){const person=people.get(row.studentId||row.employeeId);if(person)await deliver([person.userId],eventId+':'+person.id,'Attendance updated',`${req.body.date} · ${req.body.period||'Daily'} · ${row.status}`,'attendance');}return;
   }
   const supported=['homework','submissions','submission','academics','timetable','events','leave','workReports','progress','loans','notices'];
   if(!supported.includes(entity)||action==='archive')return;

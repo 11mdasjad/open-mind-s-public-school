@@ -162,3 +162,23 @@ The module permission check runs before route handlers, including exports and re
 - `POST /users/:id/password`: Super Admin sets `{password}` (8–128 characters) for another active school account; deletes existing sessions and reset tokens. Self-service passwords retain their existing 12-character policy.
 
 Detailed activity is stored in private Entry records (`module=activity`). No schema migration is required. Logs include actor identity/role, action, module, target label, safe submitted fields/values, request method/path, outcome/status, duration and timestamp. Do not use activity counts as an employee productivity score. An absence of actions means only that no matching portal actions were recorded. Routine summaries/polls are excluded. Credential material and raw request payloads are not stored. Request logging is best-effort on response completion; database failures are reported to server logs. Automated tests flush pending writes before cleanup, and use a higher global request-rate ceiling only in `NODE_ENV=test` for multi-role regression runs; production limits are unchanged.
+
+## Class registers and monthly fees
+
+- `GET /students/register`: scoped registered and imported students; imported rows have `isDraft: true`. Teacher access follows assigned class, section and session.
+- `GET /attendance/register?className=Nursery&month=2026-11`: scoped daily marks for the selected class/month; optional section. Unmarked dates remain unmarked.
+- `POST /attendance`: the existing studentId field also accepts an authorized imported record ID. Records retain the imported ID as personKey until registration. Duplicate person IDs and future dates are rejected.
+- `GET /students/:id/profile?month=2026-11`: personal data, module capabilities, monthly attendance, all invoices, pending collections, photo and document metadata for a registered or imported student.
+- `POST /students/:id/profile/files`: multipart file and kind=Photo|Document, PNG/JPEG photos or PDF/PNG/JPEG documents, 5 MB maximum.
+- `GET /students/:id/profile/files/:documentId`: scoped photo display or document download.
+- `POST /fees`: studentId accepts either authorized record type. Supply the actual title, amount in rupees, dueDate and academic session. The same fee title/session/student cannot be assigned twice in one due month. Returned invoices have either studentId or draftStudentId.
+- `POST /fees/:id/payment-requests`: collections reserve their pending amount; duplicate collection beyond the remaining unreserved balance returns 409. Submit with the existing workflow endpoint; receipts are created only after another authorized reviewer approves.
+
+Migration `202611130001_draft_student_fees` permits invoices to reference imported student entries. Registration transfers their invoices and attendance atomically and retains existing payment requests and receipt IDs. No login or placeholder contact data is created just to record attendance or fees.
+
+### Monthly school fee schedule
+
+- `GET /api/fees/schedule?session=2026–2027` returns the selected session's active monthly `Tuition fee` templates and configured transport route rates (amounts in rupees). Session defaults to the school's current academic session.
+- `PUT /api/fees/schedule/transport` accepts `{session, routes: [{route, amount}]}`. Requires fee and fee-structure management access and an administrator/accountant role. Existing invoices are not repriced.
+- `POST /api/fees` also accepts `scheduleKind: "tuition" | "transport"` and `transportRoute` for transport. These charges use the database rate for the student's class/session or selected route; the server determines their amount and description. Only one charge of the same scheduled kind can be assigned per student/month/session. Custom fee requests retain their existing behavior.
+- Monthly class assignments skip students already billed for that template/month. Fee schedules themselves do not create invoices.

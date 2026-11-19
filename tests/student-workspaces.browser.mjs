@@ -1,0 +1,122 @@
+import {chromium,expect} from '@playwright/test';
+import assert from 'node:assert/strict';
+import {mkdirSync} from 'node:fs';
+const browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+mkdirSync('test-results',{recursive:true});
+try{
+  const page=await browser.newPage({viewport:{width:1440,height:1000},reducedMotion:'reduce'});page.setDefaultTimeout(12000);
+  const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error(e.message);});
+  const roster=[{id:'d1',name:'Nursery One',className:'Nursery',section:'A',session:'2026–2027',details:{rollNumber:'1'},isDraft:true},{id:'d2',name:'Nursery Two',className:'Nursery',section:'A',details:{rollNumber:'2'},isDraft:true},{id:'d3',name:'Class Seven Student',className:'Class 7',details:{rollNumber:'3'},isDraft:true}];
+  const attendance=[],invoices=[],pending=[];let reads=0,payments=0,failNextSave=false;
+  await page.route('**/api/**',async route=>{
+    const url=new URL(route.request().url()),p=url.pathname,method=route.request().method();let data=[];
+    if(p==='/api/auth/me')data={user:{id:'admin',name:'Preview Admin',role:'Super Admin'}};
+    else if(p==='/api/setup')data={required:false};
+    else if(p==='/api/public')data={pages:{},settings:{}};
+    else if(p==='/api/students/register')data=roster;
+    else if(p==='/api/school-settings')data={academicSession:'2026–2027'};
+    else if(p==='/api/fees/schedule')data={session:'2026–2027',tuition:[{id:'t1',className:'Nursery',amount:350},{id:'t7',className:'Class 7',amount:400}],transport:[{route:'Jalalpur',amount:300},{route:'Lakri',amount:800}]};
+    else if(p==='/api/integrations')data={};
+    else if(p.includes('notifications'))data={rows:[],recent:[],unread:0,total:0};
+    else if(p==='/api/attendance/register'){reads++;data={records:attendance.filter(r=>r.date.startsWith(url.searchParams.get('month'))),month:url.searchParams.get('month')};}
+    else if(p==='/api/attendance'&&method==='POST'){
+      if(failNextSave){failNextSave=false;return route.fulfill({status:503,json:{error:'Connection interrupted.'}});}
+      const body=route.request().postDataJSON();assert.equal(body.period,'Daily');
+      for(const mark of body.records){const existing=attendance.find(r=>r.personKey===mark.studentId&&r.date===body.date);if(existing)existing.status=mark.status;else attendance.push({id:`a${attendance.length}`,personKey:mark.studentId,date:body.date,status:mark.status,period:'Daily'});}data={ok:true};
+    } else if(p.endsWith('/profile')){const id=p.split('/')[3];data={student:roster.find(s=>s.id===id),month:url.searchParams.get('month'),access:{fees:true,payments:true,attendance:true,documents:true,edit:true,uploadDocuments:true},invoices:invoices.filter(i=>i.draftStudentId===id),attendance:attendance.filter(r=>r.personKey===id),pending,documents:[],photo:null};}
+    else if(p==='/api/fees'&&method==='POST'){const body=route.request().postDataJSON();assert.equal(body.studentId,'d1');assert.equal(body.amount,1000);data={...body,id:'invoice1',draftStudentId:body.studentId,amount:body.amount*100,number:'INV-1',payments:[]};invoices.push(data);}
+    else if(p==='/api/fees/invoice1/payment-requests'){payments++;const body=route.request().postDataJSON();assert.equal(body.amount,1000);data={id:'collection1'};}
+    else if(p==='/api/workflow/submit'){pending.push({id:'collection1',status:'Pending',data:{invoiceId:'invoice1'}});data={id:'approval1'};}
+    await route.fulfill({json:data});
+  });
+  await page.goto('http://127.0.0.1:5173/#/admin/attendance');
+  for(const name of ['Nursery','LKG','UKG','Class 1','Class 2','Class 3','Class 4','Class 5','Class 6','Class 7'])await expect(page.getByRole('button',{name:new RegExp(`^${name} attendance,`)})).toBeVisible();
+  await page.getByRole('button',{name:'Nursery attendance, 2 students'}).click();
+  const date=page.getByLabel('Class attendance date');await date.fill('2026-11-12');
+  const summary=page.getByRole('region',{name:'Attendance summary',exact:true});
+  const totalFor=label=>summary.locator('dl > div').filter({has:page.locator('dt',{hasText:new RegExp(`^${label}$`)})}).locator('dd');
+  await expect(totalFor('Total students')).toHaveText('2');
+  await expect(totalFor('Not marked')).toHaveText('2');
+  await page.getByRole('group',{name:'Attendance for Nursery One',exact:true}).getByRole('radio',{name:'Present',exact:true}).check();
+  await page.getByRole('group',{name:'Attendance for Nursery Two',exact:true}).getByRole('radio',{name:'Absent',exact:true}).check();
+  await expect(totalFor('Present')).toHaveText('1');
+  await expect(totalFor('Absent')).toHaveText('1');
+  await expect(totalFor('Not marked')).toHaveText('0');
+  await page.getByLabel('Find attendance student').fill('Nursery One');
+  await expect(totalFor('Total students')).toHaveText('2');
+  await expect(totalFor('Absent')).toHaveText('1');
+  await page.getByLabel('Find attendance student').fill('');
+  await summary.screenshot({path:'test-results/attendance-review-before-save.png'});
+  failNextSave=true;
+  await page.getByRole('button',{name:'Save attendance',exact:true}).click();
+  await expect(summary.getByRole('alert')).toContainText('Your selections are still here');
+  await expect(page.getByRole('group',{name:'Attendance for Nursery Two',exact:true}).getByRole('radio',{name:'Absent',exact:true})).toBeChecked();
+
+  await page.getByRole('button',{name:'Save attendance',exact:true}).click();
+  await expect(page.locator('.sp-notice')).toContainText('Attendance saved');
+  await expect(page.getByRole('group',{name:'Attendance for Nursery Two',exact:true}).getByRole('radio',{name:'Absent',exact:true})).toBeChecked();
+  await expect(summary.getByRole('status')).toContainText('2 of 2 students recorded');
+  await page.reload();
+  await page.getByRole('button',{name:'Nursery attendance, 2 students'}).click();
+  await date.fill('2026-11-12');
+  await expect(totalFor('Present')).toHaveText('1');
+  await expect(totalFor('Absent')).toHaveText('1');
+  await expect(summary.getByRole('heading',{name:'Saved attendance',exact:true})).toBeVisible();
+  const count=reads;await date.fill('2026-11-11');
+  await expect(page.getByRole('group',{name:'Attendance for Nursery One',exact:true}).locator('input:checked')).toHaveCount(0);assert.equal(reads,count,'Dates within one month reuse the loaded register');
+  const firstMarks=page.getByRole('group',{name:'Attendance for Nursery One',exact:true});
+  await firstMarks.getByRole('radio',{name:'Leave',exact:true}).check();
+  await expect(firstMarks.locator('input:checked')).toHaveCount(1);
+  await expect(firstMarks.getByRole('radio',{name:'Leave',exact:true})).toBeChecked();
+  await page.getByRole('button',{name:'Undo attendance change for Nursery One',exact:true}).click();
+  await expect(firstMarks.locator('input:checked')).toHaveCount(0);
+  await page.getByRole('button',{name:'Mark unmarked present',exact:true}).click();
+  page.once('dialog',dialog=>dialog.dismiss());await date.fill('2026-11-10');
+  await expect(date).toHaveValue('2026-11-11');
+  await page.getByRole('button',{name:'Save attendance',exact:true}).click();
+  await expect(page.locator('.sp-notice')).toContainText('Attendance saved');
+  await page.getByRole('button',{name:'Attendance on 2026-11-12',exact:true}).click();
+  await expect(page.getByRole('group',{name:'Attendance for Nursery Two',exact:true}).getByRole('radio',{name:'Absent',exact:true})).toBeChecked();
+  await page.screenshot({path:'test-results/class-attendance-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  const mobileMarks=page.getByRole('group',{name:'Attendance for Nursery Two',exact:true});
+  await mobileMarks.getByRole('radio',{name:'Leave',exact:true}).check();
+  await mobileMarks.getByRole('radio',{name:'Leave',exact:true}).press('ArrowLeft');
+  await expect(mobileMarks.getByRole('radio',{name:'Absent',exact:true})).toBeChecked();
+  await mobileMarks.getByRole('radio',{name:'Absent',exact:true}).press('ArrowRight');
+  await expect(mobileMarks.getByRole('radio',{name:'Leave',exact:true})).toBeChecked();
+  await page.getByRole('button',{name:'Save attendance',exact:true}).click();
+  await expect(page.locator('.sp-notice')).toContainText('Attendance saved');
+  assert.equal(attendance.find(r=>r.personKey==='d2'&&r.date==='2026-11-12').status,'Leave');
+  await expect(totalFor('Leave')).toHaveText('1');
+  await expect(totalFor('Absent')).toHaveText('0');
+  await page.screenshot({path:'test-results/class-attendance-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto('http://127.0.0.1:5173/#/admin/fees');
+  await page.getByRole('button',{name:'Nursery fees, 2 students'}).click();
+  await page.getByRole('button',{name:/Nursery One.*Monthly fees/}).click();
+  await page.getByLabel('Fee year').fill('2026');
+  await expect(page.locator('.fee-months button')).toHaveCount(12);
+  await page.getByRole('button',{name:'Fees for November 2026: Not assigned',exact:true}).click();
+  await expect(page.getByText('No fee assigned for November 2026. Set the fee amount before recording payment.')).toBeVisible();
+  await page.getByRole('button',{name:'Assign fee',exact:true}).click();
+  await expect(page.getByLabel('Fee amount (₹)',{exact:true})).toHaveValue('350');
+  await page.getByLabel('Fee type',{exact:true}).selectOption('transport');
+  await page.getByLabel('Student fee transport route',{exact:true}).selectOption('Lakri');
+  await expect(page.getByLabel('Fee amount (₹)',{exact:true})).toHaveValue('800');
+  await page.getByLabel('Fee type',{exact:true}).selectOption('custom');
+  await page.getByLabel('Fee description',{exact:true}).fill('Activity fee');
+  await page.getByLabel('Fee amount (₹)',{exact:true}).fill('1000');
+  await page.getByRole('button',{name:'Save fee',exact:true}).click();
+  await expect(page.locator('tbody .sp-badge')).toHaveText('Unpaid');
+  await page.getByRole('button',{name:'Add payment',exact:true}).click();
+  await page.getByRole('button',{name:'Submit payment',exact:true}).click();
+  await expect(page.locator('tbody .sp-badge')).toHaveText('Pending');assert.equal(payments,1);
+  await page.getByRole('button',{name:'All months',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Fees for November 2026: Pending',exact:true})).toBeVisible();
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:'test-results/monthly-fees-mobile.png',fullPage:true});
+  assert.deepEqual(errors,[]);console.log('Passed class selection, daily save/history, unsaved-change protection, imported students, monthly fee assignment, payments, and mobile layout.');
+}finally{await browser.close();}

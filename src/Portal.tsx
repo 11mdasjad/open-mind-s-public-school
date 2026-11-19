@@ -1,10 +1,7 @@
 import {NotificationBell,NotificationCenter} from './NotificationCenter';
 import {EmployeeCredentials} from './EmployeeCredentials';
-import {EmployeeDirectory} from './EmployeeDirectory';
-import {AdminDashboard} from './AdminDashboard';
-import {ActivityDashboard} from './ActivityDashboard';
 import {WorkspaceDashboard,FlowPanel,SchoolSettings} from './FlowWorkspace';
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, lazy, Suspense, type ReactNode } from "react";
 import {
   LayoutDashboard,
   Users,
@@ -58,7 +55,38 @@ import {MemberDashboard,MemberProfile} from "./MemberDashboard";
 import { Brand, Modal } from "./App";
 import { modules, admins, roles, type Field } from "../shared/modules";
 import "./portal-theme.css";
+const FeeOffice=lazy(()=>import("./FeeOffice").then(m=>({default:m.FeeOffice})));
+const EmployeeDirectory=lazy(()=>import('./EmployeeDirectory').then(m=>({default:m.EmployeeDirectory})));
+const AdminDashboard=lazy(()=>import('./AdminDashboard').then(m=>({default:m.AdminDashboard})));
+const ActivityDashboard=lazy(()=>import('./ActivityDashboard').then(m=>({default:m.ActivityDashboard})));
+const StudentProfile=lazy(()=>import('./StudentProfile').then(m=>({default:m.StudentProfile})));
+const AttendanceWorkspace=lazy(()=>import('./StudentWorkspaces').then(m=>({default:m.AttendanceWorkspace})));
+const FeeWorkspace=lazy(()=>import('./StudentWorkspaces').then(m=>({default:m.FeeWorkspace})));
+const SchoolFeeSchedule=lazy(()=>import('./FeeSchedule').then(m=>({default:m.SchoolFeeSchedule})));
 type Row = Record<string, any>;
+const standardStudentClasses = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  ...Array.from({ length: 7 }, (_, index) => `Class ${index + 1}`),
+];
+const studentClassKey = (value: string) => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/^(class|grade|standard|std\.?)\s*/, "")
+    .replace(/(st|nd|rd|th)$/, "");
+  if (["nursery", "lkg", "ukg"].includes(normalized)) return normalized;
+  return /^\d+$/.test(normalized) ? `class-${Number(normalized)}` : normalized;
+};
+const studentClassLabel = (value: string) => {
+  const key = studentClassKey(value);
+  if (key === "nursery") return "Nursery";
+  if (key === "lkg") return "LKG";
+  if (key === "ukg") return "UKG";
+  if (/^class-\d+$/.test(key)) return `Class ${key.slice(6)}`;
+  return value.trim();
+};
 const studentFields: Field[] = [
   { key: "name", label: "Full name", required: true },
   { key: "email", label: "Student email", type: "email", required: true },
@@ -88,11 +116,13 @@ studentFields.push(
     { key: "details.district", label: "District" },
     { key: "details.pinCode", label: "PIN code" },
     { key: "details.alternatePhone", label: "Alternate phone", type: "tel" },
+    { key: "details.emergencyContact", label: "Emergency contact" },
     { key: "details.occupation", label: "Parent occupation" },
     { key: "details.previousSchool", label: "Previous school" },
     { key: "details.rollNumber", label: "Roll number" },
     { key: "details.house", label: "House" },
     { key: "details.admissionDate", label: "Admission date", type: "date" },
+    { key: "details.importNote", label: "Source / verification note", type: "textarea" },
   ],
 );
 const employeeFields: Field[] = [
@@ -326,11 +356,14 @@ export function Portal({
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState(""),
     [page, setPage] = useState(1),
+    [studentPageSize, setStudentPageSize] = useState<number | "all">(50),
     [modal, setModal] = useState<Row | null>(null),
     [toast, setToast] = useState(""),
     [revision, setRevision] = useState(0),
     [sidebar, setSidebar] = useState(false),
     [students, setStudents] = useState<Row[]>([]),
+    [studentDrafts, setStudentDrafts] = useState<Row[]>([]),
+    [selectedStudentClass, setSelectedStudentClass] = useState(""),
     [employees, setEmployees] = useState<Row[]>([]),
     [dateFilter, setDateFilter] = useState(today()),
     [integrations, setIntegrations] = useState<Row>({}),
@@ -367,6 +400,8 @@ export function Portal({
     setTimeout(() => setToast(""), 5000);
   };
   const refresh = () => setRevision((r) => r + 1);
+  const profileId = ['students','fees'].includes(tab) ? new URLSearchParams(route.split('?')[1] || '').get('profile') : null;
+  const openStudentProfile = (student: Row) => { location.hash = `${portalHome(user.role, 'students')}?profile=${encodeURIComponent(student.id)}`; };
   const go = (key: string,recordId?:string) => {
     if(key!==tab){setRows([]);setLoading(true);setError('');}
     location.hash = portalHome(user.role,key)+(recordId?`?record=${encodeURIComponent(recordId)}`:'');
@@ -375,12 +410,13 @@ export function Portal({
     setQuery(recordId||"");
     setFilter("");
     setSessionFilter("");
+    setSelectedStudentClass("");
     setPage(1);
   };
   useEffect(()=>{if(canSee(tab))void api('/portal-events','POST',{module:tab}).catch(()=>{});},[tab]);
   useEffect(() => {
     const nextTab=portalTab(route);
-    if(nextTab!==tab){setRows([]);setLoading(true);setError('');setTab(nextTab);}
+    if(nextTab!==tab){setRows([]);setLoading(true);setError('');setTab(nextTab);setSelectedStudentClass('');}
     setQuery(new URLSearchParams(route.split('?')[1]||'').get('record')||'');setFilter('');setSessionFilter('');setPage(1);
   }, [route]);
   useEffect(() => {
@@ -392,7 +428,7 @@ export function Portal({
     const p =
       tab === "overview"
         ? api(operational?"/workspace-summary":member?"/portal-summary":"/dashboard")
-        : ["audit","settings", "reports","approvals","notifications","permissions","analytics","paymentVerifications"].includes(tab)
+        : ["attendance",...(!family?["fees"]:[]),"audit","settings", "reports","approvals","notifications","permissions","analytics","paymentVerifications"].includes(tab)
           ? Promise.resolve([])
           : api(
               pathFor(tab) +
@@ -412,18 +448,28 @@ export function Portal({
     return () => {
       live = false;
     };
-  }, [tab, revision, dateFilter]);
+  }, [tab, revision]);
   useEffect(() => {
     api("/school-settings").then(setSchool).catch(()=>{});
     api("/integrations")
       .then(setIntegrations)
       .catch(() => {});
-    if(canSee('students'))api("/students").then(setStudents).catch(()=>{});
+  }, [user.id]);
+  useEffect(() => {
+    if(canSee('students') && !['attendance','fees','audit','notifications','settings','overview'].includes(tab))api("/students").then(setStudents).catch(()=>{});
     else setStudents([]);
-    api("/directory")
+    if (tab==='students' && ["Super Admin", "School Admin", "Principal"].includes(user.role))
+      api("/student-drafts")
+        .then(setStudentDrafts)
+        .catch((e) => {
+          setStudentDrafts([]);
+          notify(e.message);
+        });
+    else setStudentDrafts([]);
+    if(!['students','fees','audit','notifications','settings','overview'].includes(tab))api("/directory")
       .then(setEmployees)
       .catch(() => {});
-  }, [revision]);
+  }, [revision, tab]);
   async function action(url: string, method = "POST", body?: any) {
     try {
       await api(url, method, body);
@@ -434,17 +480,46 @@ export function Portal({
       notify(e.message);
     }
   }
-  const filtered = rows.filter(
+  const studentDraftRows = studentDrafts.map((draft) => {
+    const data = draft.data || {};
+    const details =
+      data.details ||
+      Object.fromEntries(
+        Object.entries(data)
+          .filter(([key]) => key.startsWith("details."))
+          .map(([key, value]) => [key.slice(8), value]),
+      );
+    return {
+      ...data,
+      id: draft.id,
+      name: data.name || "",
+      className: data.className || "",
+      details,
+      admissionNo: "",
+      isDraft: true,
+    };
+  });
+  const displayRows = tab === "students" ? [...rows, ...studentDraftRows] : rows;
+  const filtered = displayRows.filter(
     (r) =>
-      JSON.stringify(r).toLowerCase().includes(query.toLowerCase()) &&
+      (tab === 'students'
+        ? [r.name, r.details?.rollNumber, r.admissionNo, r.id].some(value => String(value || '').toLowerCase().includes(query.trim().toLowerCase()))
+        : JSON.stringify(r).toLowerCase().includes(query.toLowerCase())) &&
+      (!selectedStudentClass ||
+        tab !== "students" ||
+        studentClassKey(r.className) === selectedStudentClass) &&
       (!filter ||
         (r.status || r.role || r.className || r.data?.className) === filter) &&
       (!sessionFilter || (r.session || r.data?.session) === sessionFilter),
   );
-  const pages = Math.max(1, Math.ceil(filtered.length / 8));
+  const pageSize = tab === "students"
+    ? studentPageSize === "all" ? Math.max(1, filtered.length) : studentPageSize
+    : 8;
+  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pages);
   const shown = filtered.slice(
-    (Math.min(page, pages) - 1) * 8,
-    Math.min(page, pages) * 8,
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize,
   );
   const filters = [
     ...new Set(
@@ -453,7 +528,50 @@ export function Portal({
         .filter(Boolean),
     ),
   ];
+  const studentClassGroups = [
+    ...standardStudentClasses.map((label) => ({
+      label,
+      key: studentClassKey(label),
+    })),
+    ...[
+      ...new Set(
+        displayRows
+          .map((student) => studentClassLabel(student.className || ""))
+          .filter(
+            (label) =>
+              label &&
+              !standardStudentClasses.some(
+                (standard) =>
+                  studentClassKey(standard) === studentClassKey(label),
+              ),
+          ),
+      ),
+    ]
+      .sort((a, b) => a.localeCompare(b))
+      .map((label) => ({ label, key: studentClassKey(label) })),
+  ];
   const addEmployee = () => setModal({type:'form',title:'Add employee',fields:employeeFields,endpoint:'/employees',module:'employees',defaults:{joiningDate:today()}});
+  const editStudentDraft = (student: Row) =>
+    setModal({
+      type: "form",
+      title: `Edit incomplete student · ${student.name || student.details?.rollNumber || "Nursery"}`,
+      fields: studentFields.map((field) => ({ ...field, required: false })),
+      endpoint: `/student-drafts/${student.id}`,
+      method: "PUT",
+      module: "studentDrafts",
+      defaults: student,
+    });
+  const completeStudentDraft = async (student: Row) => {
+    try {
+      const result = await api(`/student-drafts/${student.id}/complete`, "POST", {});
+      refresh();
+      if (result.activationTokens?.length)
+        setModal({ type: "invites", tokens: result.activationTokens });
+      notify("Student registered. Share the activation link privately.");
+    } catch (e: any) {
+      notify(e.message);
+    }
+  };
   const add = () => tab === "submissions" ? setModal({type:"submit",title:"Submit an assignment"}) :
     setModal({
       type: "form",
@@ -499,6 +617,34 @@ export function Portal({
   const separateEmployeeLogin=(employee:Row)=>setModal({type:'form',title:'Create separate employee login',fields:[{key:'email',label:'Separate employee email',type:'email',required:true}],endpoint:`/employees/${employee.id}/login`});
   const generateEmployeeLogin=(employee:Row)=>setModal({type:'confirm',title:`Generate credentials for ${employee.name}`,text:'This creates a new password and signs out existing sessions. Save the new credentials to share with this employee.',run:async()=>{try{const result=await api(`/employees/${employee.id}/credentials`,'POST',{});setModal({type:'credentials',title:'Employee login is ready',credentials:result.credentials});}catch(e:any){notify(e.message);}}});
   function rowActions(r: Row) {
+    if (tab === "students" && r.isDraft) {
+      const readyToRegister = studentFields
+        .filter((field) => field.required)
+        .every((field) => {
+          const value = field.key.startsWith("details.")
+            ? r.details?.[field.key.slice(8)]
+            : r[field.key];
+          return String(value || "").trim().length > 0;
+        });
+      return (
+        <div className="row-actions">
+          <button
+            className="small-button"
+            onClick={() => editStudentDraft(r)}
+          >
+            Edit details <Pencil size={14} />
+          </button>
+          {readyToRegister && (
+            <button
+              className="small-button"
+              onClick={() => completeStudentDraft(r)}
+            >
+              Register student <ArrowRight size={14} />
+            </button>
+          )}
+        </div>
+      );
+    }
     if(['leave','studentAssessments','employeeAssessments','appraisals','schoolReports','workReports'].includes(tab))return <div className="row-actions"><button className="small-button" onClick={()=>setModal({type:'details',record:r,title:r.title})}>View details</button>{canManage(tab)&&r.status!=='Approved'&&!(tab==='leave'&&r.status==='Rejected')&&(!['leave','workReports'].includes(tab)||r.userId===user.id)&&<><button className="small-button" onClick={()=>edit(r)}>Edit</button>{r.status!=='Rejected'&&<button className="small-button" onClick={()=>action('/workflow/submit','POST',{type:tab,entityId:r.id})}>Submit for approval</button>}</>}</div>;
     if(tab==='recruitment')return <div className="row-actions"><button className="small-button" onClick={()=>setModal({type:'details',record:r,title:r.title})}>View details</button>{canManage(tab)&&!r.data.employeeId&&<><button className="small-button" onClick={()=>edit(r)}>Edit candidate</button>{['Offer','Hired'].includes(r.data.stage)&&<button className="small-button" onClick={()=>setModal({type:'form',title:'Onboard employee',endpoint:`/recruitment/${r.id}/onboard`,fields:[{key:'joiningDate',label:'Joining date',type:'date',required:true},{key:'qualification',label:'Qualification',required:true},{key:'salary',label:'Monthly salary (₹)',type:'number',required:true}]})}>Onboard employee</button>}</>}</div>;
 
@@ -920,13 +1066,21 @@ export function Portal({
           </button>
         )}
         {tab === "students" && (
-          <a
-            className="icon-button"
-            aria-label="Download student profile"
-            href={`/api/reports/student/${r.id}`}
-          >
-            <Download size={15} />
-          </a>
+          <>
+            <button
+              className="small-button"
+              onClick={() => openStudentProfile(r)}
+            >
+              Full profile <ArrowUpRight size={14} />
+            </button>
+            <a
+              className="icon-button"
+              aria-label="Download student profile"
+              href={`/api/reports/student/${r.id}`}
+            >
+              <Download size={15} />
+            </a>
+          </>
         )}
         {canAdd() && tab !== "submissions" && (
           <>
@@ -967,22 +1121,28 @@ export function Portal({
           {(r.name || r.childName || r.title || "?").slice(0, 2).toUpperCase()}
         </span>
         <span>
-          <strong>{r.name || r.childName || r.title}</strong>
-          <small>{r.email || r.admissionNo || r.employeeNo}</small>
+          <strong>{r.name || (r.isDraft ? "Name not provided" : r.childName || r.title)}</strong>
+          <small>
+            {r.isDraft
+              ? `Incomplete record · Roll ${r.details?.rollNumber || "—"}`
+              : r.email || r.admissionNo || r.employeeNo}
+          </small>
         </span>
       </div>
     );
     if (tab === "students")
       return [
-        c("Student", person),
-        c("Class", (r) => `${r.className} · ${r.section}`),
+        c("Student", (r) => <button className="student-name-link" aria-label={`Open profile for ${r.name || 'unnamed student'}`} onClick={()=>openStudentProfile(r)}>{person(r)}</button>),
+        c("Class", (r) => [r.className, r.section].filter(Boolean).join(' · ')),
+        c("Admission no.", (r) => <button className="student-id-link" aria-label={`Open student ${r.admissionNo || r.name}`} onClick={()=>openStudentProfile(r)}>{r.admissionNo || 'Pending'}</button>),
+        c("Roll no.", (r) => r.details?.rollNumber ? <button className="student-id-link" aria-label={`Open roll ${r.details.rollNumber}, ${r.name}`} onClick={()=>openStudentProfile(r)}>{r.details.rollNumber}</button> : '—'),
+        c("Father’s name", (r) => r.details?.fatherName || r.parentName || "—"),
         c("Parent / guardian", (r) => (
           <span>
             {r.parentName}
             <small className="subtext">{r.phone}</small>
           </span>
         )),
-        c("Admission no.", (r) => r.admissionNo),
         c("Session", (r) => r.session),
       ];
     if (tab === "employees")
@@ -1356,7 +1516,7 @@ export function Portal({
                 <button className="button dark" onClick={() => go("students")}>
                   Manage students <ArrowUpRight size={16} />
                 </button>
-              ) : canAdd() ? (
+              ) : canAdd() && !['fees','feeStructures'].includes(tab) ? (
                 <button className="button dark" onClick={add}>
                   <Plus size={17} /> Add{" "}
                   {modules[tab]?.singular.toLowerCase() ||
@@ -1375,7 +1535,8 @@ export function Portal({
             </div>
           </div>
           {new URLSearchParams(route.split('?')[1]||'').has('record')&&<div className="notification-record-context"><span>Showing the record linked to your notification. If it is no longer active or available to your account, it will not appear below.</span><button onClick={()=>go(tab)}>Show all records</button></div>}
-          {error ? (
+          <Suspense fallback={<p role="status" className="rw-pad">Loading workspace…</p>}>
+          {["fees","feeStructures"].includes(tab) && !profileId ? <FeeOffice user={user} initialPage={tab==="feeStructures"?"structure":"overview"}/> : error ? (
             <div className="error-state">
               <p>{error}</p>
               <button className="button light" onClick={refresh}>
@@ -1389,11 +1550,13 @@ export function Portal({
               ))}
               <div className="skeleton full" />
             </div>
+          ) : profileId ? (
+            <StudentProfile key={profileId} id={profileId} revision={revision} initialTab={tab==='fees'?'Fees':'Overview'} feesOnly={tab==='fees'} academicSession={school.academicSession||''} onBack={()=>{const selected=new URLSearchParams(route.split('?')[1]||'').get('class');location.hash=portalHome(user.role,tab)+(tab==='fees'&&selected?`?class=${encodeURIComponent(selected)}`:'');}} onEdit={student=>student.isDraft?editStudentDraft(student):edit(student)} renderDetails={student=><StudentRecordProfile student={student}/>}/>
           ) : tab === "overview" && stats ? (
             operational?<WorkspaceDashboard data={stats} user={user} go={go}/>:member?<MemberDashboard data={stats} user={user} go={go} refresh={refresh} notify={notify}/>:<AdminDashboard stats={stats} user={user} go={go} session={school.academicSession} items={nav.flatMap(g=>g.items.filter(([key])=>key!=='overview'&&canSee(key as string)).map(([key,label,Icon]:any)=>({key,label,Icon,group:g.group,description:modules[key]?.description||'School records and tools'})))}/>
           ) : tab==='employees'&&isAdmin?<EmployeeDirectory employees={filtered} canViewActivity={user.role==='Super Admin'&&canSee('audit')} actions={r=><>{user.role==='Super Admin'&&admins.includes(r.accountRole)&&<button className="button dark" onClick={()=>separateEmployeeLogin(r)}><ShieldCheck size={15}/> Create separate employee login</button>}{user.role==='Super Admin'&&!admins.includes(r.accountRole)&&r.userId!==user.id&&<button className="button light" onClick={()=>generateEmployeeLogin(r)}><ShieldCheck size={15}/> Generate login credentials</button>}{rowActions(r)}</>} tools={<><button className="small-button" disabled={!rows.length} onClick={()=>exportCsv(rows,'employees')}><Download size={14}/> CSV</button><button className="small-button" disabled={!rows.length} onClick={()=>import('./excel').then(m=>m.downloadExcel(rows,'employees')).catch(()=>notify('Export could not be generated.'))}>Excel</button><a className="small-button" href="/api/exports/employees.pdf">PDF</a>{canAdd()&&<button className="small-button" onClick={()=>setModal({type:'import',title:'Import employees'})}><Upload size={14}/> Import</button>}</>}/>:tab==='audit'?<ActivityDashboard/>:tab==='notifications'?<NotificationCenter go={go}/>: ["approvals","notifications","permissions","analytics","paymentVerifications"].includes(tab)?<FlowPanel key={tab} tab={tab} user={user} go={go} notify={notify} focusRecordId={new URLSearchParams(route.split('?')[1]||'').get('record')||undefined}/>: ((tab === "students" && family)||(tab === "employees" && member && user.role!=="HR Manager")) ? (<MemberProfile records={rows} kind={family?"student":"employee"} user={user} go={go}/>) : tab === "settings" ? (
             <SettingsPage
-              onSaved={refresh}
+              onSaved={settings=>{setSchool(settings);refresh();}}
               user={user}
               onLogout={async () => {
                 try {
@@ -1408,28 +1571,22 @@ export function Portal({
           ) : tab === "reports" ? (
             <Reports students={students} notify={notify} />
           ) : tab === "attendance" ? (
-            <Attendance
-              user={user}
-              students={students}
-              employees={employees}
-              rows={rows}
-              day={dateFilter}
-              setDay={setDateFilter}
-              notify={notify}
-              refresh={refresh}
-            />
+            <AttendanceWorkspace user={user} staffAttendance={<Attendance user={user} students={students} employees={employees} rows={rows} day={dateFilter} setDay={setDateFilter} notify={notify} refresh={refresh} staffOnly/>}/>
+          ) : tab === "fees" && !family ? (
+            <FeeWorkspace initialClass={new URLSearchParams(route.split('?')[1]||'').get('class')||''} onOpen={student=>{location.hash=`${portalHome(user.role,'fees')}?profile=${encodeURIComponent(student.id)}&class=${encodeURIComponent(student.className)}`;}}/>
           ) : (
             <section className="data-panel">
+              {tab==='feeStructures'&&<SchoolFeeSchedule session={school.academicSession||''} revision={revision}/>}
               <div className="table-toolbar">
                 <div className="table-title">
-                  {labelFor(tab)} <span>{rows.length}</span>
+                  {labelFor(tab)} <span>{displayRows.length}</span>
                 </div>
                 <div className="table-controls">
                   <label className="table-search">
                     <Search size={15} />
                     <input
                       aria-label="Search records"
-                      placeholder="Search records…"
+                      placeholder={tab === 'students' ? 'Name, roll or admission number…' : 'Search records…'}
                       value={query}
                       onChange={(e) => {
                         setQuery(e.target.value);
@@ -1437,7 +1594,7 @@ export function Portal({
                       }}
                     />
                   </label>
-                  {filters.length > 0 && (
+                  {filters.length > 0 && tab !== "students" && (
                     <select
                       aria-label="Filter records"
                       value={filter}
@@ -1530,7 +1687,10 @@ export function Portal({
                   >
                     Excel
                   </button>
-                  {["students", "employees"].includes(tab) && canAdd() && (
+                  {["students", "employees"].includes(tab) &&
+                    canAdd() &&
+                    (tab !== "students" ||
+                      ["Super Admin", "School Admin", "Principal"].includes(user.role)) && (
                     <button
                       className="small-button"
                       onClick={() =>
@@ -1542,82 +1702,175 @@ export function Portal({
                   )}
                 </div>
               </div>
-              {shown.length ? (
-                <>
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          {columns().map((c) => (
-                            <th key={c.label}>{c.label}</th>
-                          ))}
-                          <th className="actions-col">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {shown.map((r) => (
-                          <tr key={r.id}>
-                            {columns().map((c) => (
-                              <td key={c.label}>{c.render(r)}</td>
-                            ))}
-                            <td>{rowActions(r)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="table-pagination">
-                    <span>
-                      Showing {(Math.min(page, pages) - 1) * 8 + 1}–
-                      {Math.min(Math.min(page, pages) * 8, filtered.length)} of{" "}
-                      {filtered.length} records
-                    </span>
-                    <div>
+              {tab === "students" && !selectedStudentClass && !query.trim() ? (
+                <div className="student-class-grid">
+                  {studentClassGroups.map(({ label, key }) => {
+                    const count = displayRows.filter(
+                      (student) =>
+                        studentClassKey(student.className || "") === key,
+                    ).length;
+                    return (
                       <button
-                        className="icon-button"
-                        aria-label="Previous page"
-                        disabled={page <= 1}
-                        onClick={() => setPage((p) => p - 1)}
+                        className="student-class-card"
+                        key={key}
+                        aria-label={`${label}, ${count} ${count === 1 ? "student" : "students"}`}
+                        onClick={() => {
+                          setSelectedStudentClass(key);
+                          setPage(1);
+                        }}
                       >
-                        <ChevronLeft size={17} />
+                        <span className="student-class-icon">
+                          <GraduationCap size={20} />
+                        </span>
+                        <strong>{label}</strong>
+                        <span>
+                          {count} {count === 1 ? "student" : "students"}
+                        </span>
+                        <ArrowRight size={16} />
                       </button>
-                      <span>
-                        {Math.min(page, pages)} / {pages}
-                      </span>
-                      <button
-                        className="icon-button"
-                        aria-label="Next page"
-                        disabled={page >= pages}
-                        onClick={() => setPage((p) => p + 1)}
-                      >
-                        <ChevronRight size={17} />
-                      </button>
-                    </div>
-                  </div>
-                </>
+                    );
+                  })}
+                </div>
               ) : (
-                <Empty
-                  title={
-                    query || filter
-                      ? "No matching records."
-                      : `Your ${labelFor(tab).toLowerCase()} start here.`
-                  }
-                  text={
-                    query || filter
-                      ? "Try another search or filter."
-                      : "Records will appear here when they are added to your school."
-                  }
-                  action={
-                    canAdd() ? (
-                      <button className="button dark" onClick={add}>
-                        <Plus size={16} /> Add your first record
-                      </button>
-                    ) : undefined
-                  }
-                />
+                <>
+                  {tab === "students" && (
+                    <div className="student-roster-heading">
+                      <div>
+                        <button
+                          className="small-button"
+                          onClick={() => {
+                            setSelectedStudentClass("");
+                            setQuery("");
+                            setPage(1);
+                          }}
+                        >
+                          <ArrowLeft size={14} /> All classes
+                        </button>
+                        <h2>
+                          {studentClassGroups.find(
+                            (group) => group.key === selectedStudentClass,
+                          )?.label || "Matching"}{" "}
+                          students
+                        </h2>
+                      </div>
+                      <div className="student-roster-controls">
+                        <span>
+                          {filtered.length}{" "}
+                          {filtered.length === 1 ? "student" : "students"}
+                        </span>
+                        <label className="student-page-size">
+                          Per page
+                          <select
+                            aria-label="Students per page"
+                            value={studentPageSize}
+                            onChange={(e) => {
+                              setStudentPageSize(e.target.value === "all" ? "all" : Number(e.target.value));
+                              setPage(1);
+                            }}
+                          >
+                            <option value={50}>50</option>
+                            <option value={100}>100</option>
+                            <option value={150}>150</option>
+                            <option value="all">All</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                  {shown.length ? (
+                    <>
+                      <div className="table-scroll">
+                        <table>
+                          <thead>
+                            <tr>
+                              {columns().map((c) => (
+                                <th key={c.label}>{c.label}</th>
+                              ))}
+                              <th className="actions-col">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {shown.map((r) => (
+                              <tr key={r.id}>
+                                {columns().map((c) => (
+                                  <td key={c.label}>{c.render(r)}</td>
+                                ))}
+                                <td>{rowActions(r)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="table-pagination">
+                        <span>
+                          Showing {(currentPage - 1) * pageSize + 1}–
+                          {Math.min(currentPage * pageSize, filtered.length)} of{" "}
+                          {filtered.length} records
+                        </span>
+                        <div>
+                          <button
+                            className="icon-button"
+                            aria-label="Previous page"
+                            disabled={currentPage <= 1}
+                            onClick={() => setPage(currentPage - 1)}
+                          >
+                            <ChevronLeft size={17} />
+                          </button>
+                          <span>
+                            {currentPage} / {pages}
+                          </span>
+                          <button
+                            className="icon-button"
+                            aria-label="Next page"
+                            disabled={currentPage >= pages}
+                            onClick={() => setPage(currentPage + 1)}
+                          >
+                            <ChevronRight size={17} />
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <Empty
+                      title={
+                        query || filter
+                          ? "No matching records."
+                          : `Your ${labelFor(tab).toLowerCase()} start here.`
+                      }
+                      text={
+                        query || filter
+                          ? "Try another search or filter."
+                          : "Records will appear here when they are added to your school."
+                      }
+                      action={
+                        selectedStudentClass || canAdd() ? (
+                          <>
+                            {selectedStudentClass && (
+                              <button
+                                className="button light"
+                                onClick={() => {
+                                  setSelectedStudentClass("");
+                                  setQuery("");
+                                }}
+                              >
+                                <ArrowLeft size={16} /> All classes
+                              </button>
+                            )}
+                            {canAdd() && (
+                              <button className="button dark" onClick={add}>
+                                <Plus size={16} /> Add your first record
+                              </button>
+                            )}
+                          </>
+                        ) : undefined
+                      }
+                    />
+                  )}
+                </>
               )}
             </section>
           )}
+          </Suspense>
           <div className="portal-footer">
             <span>OPEN MIND'S PUBLIC SCHOOL</span>
             <span>A little more possibility, every day.</span>
@@ -1650,9 +1903,11 @@ export function Portal({
             "Details"
           }
           onClose={() => setModal(null)}
-          wide={modal.type === "form"}
+          wide={modal.type === "form" || modal.type === "student-profile"}
         >
-          {modal.type === 'credentials' ? <EmployeeCredentials credentials={modal.credentials} notify={notify}/>:modal.type === 'details' ? <div className="record-details"><dl>{(modules[tab]?.fields||[]).filter(f=>!['title','documentId'].includes(f.key)).map(f=><div key={f.key}><dt>{f.label}</dt><dd>{f.type==='employee'?employees.find(e=>e.id===modal.record.data[f.key])?.name||'School employee':f.type==='student'?students.find(s=>s.id===modal.record.data[f.key])?.name||'Student':String(modal.record.data[f.key]??'—')}</dd></div>)}</dl>{modal.record.data.documentId&&<a className="button light" href={`/api/documents/${modal.record.data.documentId}`}><Download size={16}/> Download attachment</a>}{tab==='submissions'&&modal.record.data.feedback&&<p><strong>Teacher feedback:</strong> {modal.record.data.feedback}</p>}{tab==='homework'&&user.role==='Student'&&<button className="button dark" onClick={()=>setModal({type:'submit',title:'Submit your work',assignment:modal.record})}>Submit your work <ArrowUpRight size={16}/></button>}</div> : modal.type==='submit'? <SubmissionForm assignment={modal.assignment} onDone={()=>{setModal(null);refresh();notify('Your assignment has been submitted.');go('submissions')}}/> : modal.type === "grading" ? (
+          {modal.type === 'student-profile' ? (
+            <StudentRecordProfile student={modal.record} />
+          ) : modal.type === 'credentials' ? <EmployeeCredentials credentials={modal.credentials} notify={notify}/>:modal.type === 'details' ? <div className="record-details"><dl>{(modules[tab]?.fields||[]).filter(f=>!['title','documentId'].includes(f.key)).map(f=><div key={f.key}><dt>{f.label}</dt><dd>{f.type==='employee'?employees.find(e=>e.id===modal.record.data[f.key])?.name||'School employee':f.type==='student'?students.find(s=>s.id===modal.record.data[f.key])?.name||'Student':String(modal.record.data[f.key]??'—')}</dd></div>)}</dl>{modal.record.data.documentId&&<a className="button light" href={`/api/documents/${modal.record.data.documentId}`}><Download size={16}/> Download attachment</a>}{tab==='submissions'&&modal.record.data.feedback&&<p><strong>Teacher feedback:</strong> {modal.record.data.feedback}</p>}{tab==='homework'&&user.role==='Student'&&<button className="button dark" onClick={()=>setModal({type:'submit',title:'Submit your work',assignment:modal.record})}>Submit your work <ArrowUpRight size={16}/></button>}</div> : modal.type==='submit'? <SubmissionForm assignment={modal.assignment} onDone={()=>{setModal(null);refresh();notify('Your assignment has been submitted.');go('submissions')}}/> : modal.type === "grading" ? (
             <GradingRules
               onDone={() => {
                 setModal(null);
@@ -1878,6 +2133,88 @@ function Empty({
     </div>
   );
 }
+function StudentRecordProfile({ student }: { student: Row }) {
+  const details = student.details || {};
+  const sections: { title: string; fields: [string, unknown][] }[] = [
+    {
+      title: "Student information",
+      fields: [
+        ["Full name", student.name],
+        ["Student email", student.email],
+        ["Admission number", student.admissionNo],
+        ["Class", student.className],
+        ["Section", student.section],
+        ["Academic session", student.session],
+        ["Roll number", details.rollNumber],
+        ["Admission date", details.admissionDate],
+        ["Date of birth", student.dob],
+        ["Gender", student.gender],
+        ["Blood group", details.bloodGroup],
+        ["House", details.house],
+        ["Previous school", details.previousSchool],
+      ],
+    },
+    {
+      title: "Parent and contact information",
+      fields: [
+        ["Father’s name", details.fatherName],
+        ["Mother’s name", details.motherName],
+        ["Parent / guardian", student.parentName],
+        ["Parent occupation", details.occupation],
+        ["Parent email", student.parentEmail],
+        ["Contact number", student.phone],
+        ["Alternate phone", details.alternatePhone],
+        ["Emergency contact", details.emergencyContact],
+        ["Nationality", details.nationality],
+        ["Address", student.address],
+        ["District", details.district],
+        ["State", details.state],
+        ["PIN code", details.pinCode],
+      ],
+    },
+  ];
+  const shownKeys = new Set([
+    "fatherName", "motherName", "rollNumber", "admissionDate", "bloodGroup",
+    "house", "previousSchool", "occupation", "alternatePhone",
+    "emergencyContact", "nationality", "district", "state", "pinCode",
+  ]);
+  const additional = Object.entries(details).filter(
+    ([key, value]) => !shownKeys.has(key) && value !== "" && value != null,
+  );
+  if (additional.length)
+    sections.push({
+      title: "Additional information",
+      fields: additional.map(([key, value]) => [
+        key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase()),
+        value,
+      ]),
+    });
+  return (
+    <div className="student-record-profile">
+      <div className="student-record-sections">
+        {sections.map((section) => (
+          <section className="member-panel" key={section.title}>
+            <h3>{section.title}</h3>
+            <dl>
+              {section.fields.map(([label, value]) => (
+                <div key={label}>
+                  <dt>{label}</dt>
+                  <dd>
+                    {value == null || value === ""
+                      ? "Not provided"
+                      : typeof value === "object"
+                        ? JSON.stringify(value)
+                        : String(value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
 function RecordForm({
   fields,
   defaults,
@@ -1929,6 +2266,8 @@ function RecordForm({
             d.details ||= { ...(defaults.details || {}) };
             d.details[f.key.slice(8)] =
               f.type === "number" && value !== "" ? Number(value) : value || "";
+          } else if (module === "studentDrafts") {
+            d[f.key] = f.type === "number" && value !== "" ? Number(value) : value || "";
           } else if (value !== "" && value !== null)
             d[f.key] = f.type === "number" ? Number(value) : value;
           else if (f.required) d[f.key] = "";
@@ -2214,9 +2553,9 @@ function ImportRecords({
   return (
     <div className="form">
       <p className="form-intro">
-        Use the template column names. Each row is validated by the server.
-        Successful rows are saved immediately; failed rows are listed
-        separately. Account activation links are shown after import.
+        Use the template column names. Complete student records create school accounts.
+        Students with missing required details are saved as editable incomplete records
+        without login accounts. Other records are validated by the server.
       </p>
       <button
         className="small-button"
@@ -2244,9 +2583,10 @@ function ImportRecords({
               if (!f) return;
               const parsed = await (await import("./excel")).readExcel(f);
               for (const [i, row] of parsed.entries())
-                for (const field of fields.filter((f) => f.required))
-                  if (row[field.key] === undefined || row[field.key] === "")
-                    throw new Error(`Row ${i + 2}: missing ${field.key}`);
+                if (kind !== "students")
+                  for (const field of fields.filter((f) => f.required))
+                    if (row[field.key] === undefined || row[field.key] === "")
+                      throw new Error(`Row ${i + 2}: missing ${field.key}`);
               setRows(parsed);
             } catch (e: any) {
               setError(e.message);
@@ -2269,7 +2609,7 @@ function ImportRecords({
       )}
       {results.length > 0 && !busy ? (
         <button className="button dark" onClick={() => onDone(tokens)}>
-          Finish & view activation links <ArrowRight size={16} />
+          {tokens.length ? "Finish & view activation links" : "Finish import"} <ArrowRight size={16} />
         </button>
       ) : (
         <button
@@ -2278,7 +2618,48 @@ function ImportRecords({
           onClick={async () => {
             setBusy(true);
             const links: any[] = [];
+            const incomplete = kind === "students"
+              ? rows
+                  .map((row, i) => ({ row, i }))
+                  .filter(({ row }) =>
+                    fields.some(
+                      (field) =>
+                        field.required &&
+                        (row[field.key] === undefined || row[field.key] === ""),
+                    ),
+                  )
+              : [];
+            if (incomplete.length) {
+              try {
+                const records = incomplete.map(({ row }) => {
+                  const data: Row = { details: {} };
+                  for (const field of fields) {
+                    const value = String(row[field.key] ?? "");
+                    if (field.key.startsWith("details."))
+                      data.details[field.key.slice(8)] = value;
+                    else data[field.key] = value;
+                  }
+                  return data;
+                });
+                const result = await api("/student-drafts/import", "POST", { records });
+                incomplete.forEach(({ row, i }) =>
+                  setResults((v) => [
+                    ...v,
+                    `Row ${i + 2}: saved as an incomplete student record (${row.name || "name not provided"}).`,
+                  ]),
+                );
+                if (result.imported !== incomplete.length)
+                  throw new Error("Not all incomplete student records were imported.");
+              } catch (e: any) {
+                setResults((v) => [
+                  ...v,
+                  `Incomplete student records could not be imported: ${e.message}`,
+                ]);
+              }
+            }
+            const incompleteIndexes = new Set(incomplete.map(({ i }) => i));
             for (const [i, row] of rows.entries()) {
+              if (incompleteIndexes.has(i)) continue;
               try {
                 const data: Row = {};
                 for (const f of fields) {
@@ -2320,6 +2701,7 @@ function Attendance({
   setDay,
   notify,
   refresh,
+  staffOnly = false,
 }: {
   user: Row;
   students: Row[];
@@ -2329,24 +2711,27 @@ function Attendance({
   setDay: (s: string) => void;
   notify: (s: string) => void;
   refresh: () => void;
+  staffOnly?: boolean;
 }) {
-  const [kind, setKind] = useState(admins.includes(user.role)||["Student","Parent","Teacher","Class Teacher"].includes(user.role)?"students":"self"),
+  const [kind, setKind] = useState(staffOnly?"self":admins.includes(user.role)||["Student","Parent","Teacher","Class Teacher"].includes(user.role)?"students":"self"),
     [className, setClassName] = useState(""),
     [search, setSearch] = useState(""),
     [marks, setMarks] = useState<Record<string, string>>({}),
     [busy, setBusy] = useState(false),
+    [localRows,setLocalRows]=useState<Row[]>([]),
     [selfHistory, setSelfHistory] = useState<Row[]>([]);
   const manage =
     admins.includes(user.role) ||
     ["Teacher", "Class Teacher", "HR Manager"].includes(user.role);
   const staff = admins.includes(user.role) || user.role === "HR Manager";
+  useEffect(()=>{let live=true;api(`/attendance?date=${day}`).then(records=>{if(live)setLocalRows(records);}).catch(e=>notify(e.message));return()=>{live=false;};},[day,rows]);
   useEffect(() => {
-    setMarks(Object.fromEntries(rows.map((r) => [r.personKey, r.status])));
+    setMarks(Object.fromEntries(localRows.filter(r=>r.period==='Daily').map((r) => [r.personKey, r.status])));
     if (!["Student", "Parent"].includes(user.role))
       api("/attendance/self")
         .then(setSelfHistory)
         .catch(() => {});
-  }, [rows]);
+  }, [localRows]);
   const all = kind === "students" ? students : employees;
   const people = all.filter(
     (p) =>
@@ -2357,12 +2742,12 @@ function Attendance({
     <section className="data-panel">
       <div className="table-toolbar">
         <div className="segmented">
-          <button
+          {!staffOnly&&<button
             className={kind === "students" ? "active" : ""}
             onClick={() => setKind("students")}
           >
             Students
-          </button>
+          </button>}
           {!["Student", "Parent"].includes(user.role) && (
             <button
               className={kind === "self" ? "active" : ""}
@@ -2608,7 +2993,7 @@ function SettingsPage({
   notify,
 }: {
   user: Row;
-  onSaved:()=>void;
+  onSaved:(settings:Row)=>void;
   onLogout: () => void;
   notify: (s: string) => void;
 }) {

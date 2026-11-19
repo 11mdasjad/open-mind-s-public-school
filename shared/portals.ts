@@ -7,7 +7,7 @@ export function portalForRole(role:string):PortalKind {
   if(['Super Admin','School Admin'].includes(role))return 'admin';
   if(['Teacher','Class Teacher'].includes(role))return 'teacher';
   if(role==='HR Manager')return 'hr';
-  if(role==='Accountant')return 'accounts';
+  if(['Accountant','Fee Clerk'].includes(role))return 'accounts';
   if(role==='Student')return 'student';
   return 'employee';
 }
@@ -30,6 +30,7 @@ export function defaultPermission(role:string,key:string):AccessLevel {
     if(['approvals','studentAssessments','employeeAssessments','schoolReports','progress','exams','leave'].includes(key))return 'manage';
     return ['students','employees','academics','timetable','attendance','homework','submissions','fees','feeStructures','paymentVerifications','payroll','departments','analytics','appraisals','workReports','recruitment','accessRequests','events','notices','library','reports'].includes(key)?'view':'none';
   }
+  if(role==='Fee Clerk')return key==='fees'?'manage':key==='students'?'view':'none';
   if(role==='Accountant'&&key==='approvals')return 'manage';
   if(['events','notices','reports','approvals'].includes(key))return 'view';
   if(key==='library'&&role!=='Librarian')return 'view';

@@ -120,8 +120,114 @@
 .portal-shell .toast { background: #342354; color: #fff; border-color: #4d386c; }
 .portal-shell .toast > svg { color: #d4c3f5; }
 .portal-shell .portal-footer { color: #9d90ad; }
+.portal-shell .student-class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+  padding: 22px;
+}
+.portal-shell .student-class-card {
+  position: relative;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  min-height: 150px;
+  padding: 18px;
+  border: 1px solid #ece7f5;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #fff, #faf8ff);
+  color: var(--portal-ink);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.portal-shell .student-class-card:hover {
+  border-color: #cfc2f2;
+  box-shadow: 0 8px 20px #44347a12;
+  transform: translateY(-2px);
+}
+.portal-shell .student-class-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 12px;
+  background: #f0ebfc;
+  color: #8068c8;
+}
+.portal-shell .student-class-card strong { font-size: 15px; }
+.portal-shell .student-class-card > span:nth-of-type(2) {
+  color: var(--portal-muted);
+  font-size: 12px;
+}
+.portal-shell .student-class-card > svg:last-child {
+  position: absolute;
+  right: 16px;
+  bottom: 17px;
+  color: #9a88c8;
+}
+.portal-shell .student-roster-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 0;
+}
+.portal-shell .student-roster-heading > div { display: grid; justify-items: start; gap: 12px; }
+.portal-shell .student-roster-heading h2 {
+  margin: 0;
+  color: var(--portal-ink);
+  font-size: 20px;
+}
+.portal-shell .student-roster-heading > .student-roster-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-bottom: 8px;
+  color: var(--portal-muted);
+  font-size: 13px;
+}
+.portal-shell .student-page-size { display: flex; align-items: center; gap: 8px; }
+.portal-shell .student-page-size select {
+  padding: 8px 10px;
+  min-width: 76px;
+  border: 1px solid #ded6ee;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--portal-ink);
+  font: inherit;
+}
+.portal-shell .student-page-size select:focus-visible { outline: 2px solid #8069e8; outline-offset: 2px; }
+.portal-shell .student-record-profile { display: grid; gap: 18px; }
+.portal-shell .student-record-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #e8e1fa;
+  border-radius: 15px;
+  background: linear-gradient(110deg, #f1edfc, #fbfaff);
+}
+.portal-shell .student-record-summary > .avatar { width: 48px; height: 48px; font-size: 14px; }
+.portal-shell .student-record-summary strong,
+.portal-shell .student-record-summary span { display: block; }
+.portal-shell .student-record-summary strong { color: var(--portal-ink); font-size: 16px; }
+.portal-shell .student-record-summary div > span { margin-top: 5px; color: var(--portal-muted); font-size: 12px; }
+.portal-shell .student-record-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.portal-shell .student-record-sections > .member-panel { padding: 18px; }
+.portal-shell .student-record-sections h3 { margin: 0 0 14px; color: var(--portal-ink); font-size: 14px; }
+.portal-shell .student-record-sections dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 0; }
+.portal-shell .student-record-sections dl > div { min-width: 0; }
+.portal-shell .student-record-sections dt { color: var(--portal-muted); font-size: 10px; }
+.portal-shell .student-record-sections dd { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--portal-ink); font-size: 12px; }
 @media(max-width:700px) {
   .portal-shell .portal-sidebar { border-radius: 0 22px 22px 0; }
   .portal-shell :is(.welcome-banner,.member-welcome,.activity-hero) { border-radius: 19px; }
   .portal-shell :is(.data-panel,.kpi-card,.member-panel,.activity-main) { border-radius: 17px; }
+  .portal-shell .student-class-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px; }
+  .portal-shell .student-class-card { min-height: 136px; padding: 14px; }
+  .portal-shell .student-roster-heading { padding: 16px 14px 0; flex-wrap: wrap; }
+  .portal-shell .student-record-sections { grid-template-columns: 1fr; }
+  .portal-shell .student-record-sections dl { grid-template-columns: 1fr 1fr; }
 }
