@@ -40,7 +40,7 @@ try{
   await requireFreePort(Number(process.env.PORT||3001));await requireFreePort(5173);
   database=databaseRuntime({root});await database.ensure();
   if(database.local)await run(['node_modules/prisma/build/index.js','migrate','deploy']);
-  for(const args of [['node_modules/tsx/dist/cli.mjs','watch','server/index.ts'],['node_modules/vite/bin/vite.js','--host','127.0.0.1','--strictPort']])
+  for(const args of [['node_modules/tsx/dist/cli.mjs','watch','server/index.ts'],['node_modules/vite/bin/vite.js','--host','--strictPort']])
     void run(args,true).catch(error=>{if(!stopping){console.error(error.message);void stop(1);}});
   let checking=false,reported=false;
   if(database.local)monitor=setInterval(async()=>{
